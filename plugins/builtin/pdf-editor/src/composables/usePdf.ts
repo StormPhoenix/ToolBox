@@ -1,10 +1,12 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
-import { electronAPI } from '@toolbox/bridge';
+import { createLogger, electronAPI } from '@toolbox/bridge';
 import {
   pdfDoc, pdfLibDoc, pdfBytes, fileName, filePath,
   pages, activePageIndex, isDirty, resetState,
 } from '../store/pdfState';
+
+const log = createLogger('pdf-editor');
 
 // ── pdf.js worker ────────────────────────────────────────────
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -87,6 +89,9 @@ export async function importFromDrop(event: DragEvent): Promise<void> {
 
   // 写入路径（有则直接保存，无则另存为）
   filePath.value = srcPath;
+
+  // 打印加载文件路径
+  log.info(`ImportFromDrop: ${srcPath}`);
 }
 
 // ── 页面操作 ─────────────────────────────────────────────────

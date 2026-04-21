@@ -266,7 +266,16 @@ export function writeRendererLog(
   // debug 级别在渲染侧已被过滤，主进程侧不会收到，此处防御性处理
   if (level === 'debug') return
   const fileLevel = level === 'error' ? 'ERROR' : level === 'warn' ? 'WARN' : 'INFO'
-  writeToFile(fileLevel, `[Renderer][${tag}] ${message}`)
+  const line = `[Renderer][${tag}] ${message}`
+  // 同时输出到主进程终端，方便开发时统一查看
+  if (level === 'error') {
+    if (stderrAlive) console.error(line)
+  } else if (level === 'warn') {
+    if (stderrAlive) console.warn(line)
+  } else {
+    if (stdoutAlive) console.log(line)
+  }
+  writeToFile(fileLevel, line)
 }
 
 // ── 启动横幅 ───────────────────────────────────────────────────────────────
