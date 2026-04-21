@@ -62,6 +62,9 @@ ToolBox/
 │   │           ├── index.ts          # callBridge 实现 + electronAPI 导出
 │   │           └── logger.ts         # 插件/Shell 通用 Logger（createLogger）
 │   └── builtin/                      # 内置插件
+│       ├── pdf-merge/                # PDF 合并插件
+│       ├── pdf-split/                # PDF 拆分插件
+│       ├── pdf-editor/               # PDF 编辑插件
 │       └── welcome/                  # 欢迎页插件（示例）
 │           ├── manifest.json         # 插件元数据
 │           ├── package.json          # 独立 npm 包
@@ -297,6 +300,7 @@ const result = await electronAPI.showOpenDialog({ properties: ['openFile'] });
 |---|---|---|
 | `README.md` | 概述 | 项目简介、快速上手 |
 | `docs/plugin-bridge.md` | 技术 | `@toolbox/bridge` 插件通信桥重构说明 |
+| `docs/design/pdf-merge.md` | 设计 | PDF 合并插件功能规格、交互设计、技术方案 |
 
 > 新增文档后请在此表登记。
 

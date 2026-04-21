@@ -1,0 +1,10 @@
+{
+  "id": "pdf-merge",
+  "name": "PDF 合并",
+  "description": "将多个 PDF 文件按自定义页码范围合并为一个文件",
+  "category": "file",
+  "icon": "🔗",
+  "entry": "index.html",
+  "version": "1.0.0",
+  "builtin": true
+}
