@@ -2,14 +2,25 @@ import { ref, computed, shallowRef } from 'vue';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PDFDocument } from 'pdf-lib';
 
-export interface PageState {
-  /** 原始页索引（0-based），用于从 pdf-lib 定位操作目标 */
-  originalIndex: number;
-  /** 当前显示序号（1-based，随删除动态变化） */
+// ── 页面类型 ──────────────────────────────────────────────────
+
+export type PageKind =
+  | { kind: 'original'; originalIndex: number }
+  | { kind: 'blank' }
+  | { kind: 'image'; file: File; objectUrl: string; sizeMode: ImageSizeMode }
+  | { kind: 'pdf'; sourceBytes: Uint8Array; sourcePageIndices: number[] };
+
+/** 插入图片时的页面尺寸模式 */
+export type ImageSizeMode = 'a4' | 'fit-image' | 'match-neighbor';
+
+export interface PageState extends PageKind {
+  /** 当前显示序号（1-based，随删除/插入动态变化） */
   displayIndex: number;
   /** 是否已被标记删除（内存中，未导出） */
   removed: boolean;
 }
+
+// ── 全局状态 ──────────────────────────────────────────────────
 
 /** pdf.js 文档实例（只读渲染） */
 export const pdfDoc = shallowRef<PDFDocumentProxy | null>(null);
@@ -34,11 +45,26 @@ export const visiblePages = computed(() =>
   pages.value.filter(p => !p.removed)
 );
 
-/** 总页数（原始） */
+/** 总页数（含插入页，不含已删除） */
 export const totalPages = computed(() => pages.value.length);
 
+/** 是否有任何修改（删除或插入） */
+export const hasModifications = computed(() =>
+  pages.value.some(p => p.removed || p.kind !== 'original')
+);
+
+/** 重新计算所有可见页的 displayIndex */
+export function recalcDisplayIndex(): void {
+  let idx = 1;
+  for (const p of pages.value) {
+    if (!p.removed) {
+      p.displayIndex = idx++;
+    }
+  }
+}
+
 /** 重置所有状态 */
-export function resetState() {
+export function resetState(): void {
   pdfDoc.value = null;
   pdfLibDoc.value = null;
   pdfBytes.value = null;

@@ -14,6 +14,7 @@
         :pdfDoc="pdfDoc"
         @select="$emit('select', $event)"
         @contextmenu="(ev, idx) => $emit('contextmenu', ev, idx)"
+        @revert="$emit('revert', $event)"
       />
     </div>
   </aside>
@@ -34,6 +35,7 @@ const props = defineProps<{
 defineEmits<{
   select: [index: number];
   contextmenu: [event: MouseEvent, index: number];
+  revert: [index: number];
 }>();
 
 const listRef = ref<HTMLElement | null>(null);
