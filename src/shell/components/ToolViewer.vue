@@ -15,16 +15,17 @@
 
     <!-- webview 容器 -->
     <div class="iframe-wrapper">
+      <!-- preloadUrl 就绪后才渲染 webview，确保 preload 脚本被正确注入 -->
       <webview
-        ref="webviewRef"
+        v-if="preloadUrl"
         class="plugin-frame"
         :src="pluginUrl"
         :preload="preloadUrl"
         @did-finish-load="onLoad"
         @did-fail-load="onLoadError"
       />
-      <!-- 加载遮罩 -->
-      <div class="frame-loading" v-if="loading">
+      <!-- 加载遮罩：preload 未就绪或 webview 仍在加载时显示 -->
+      <div class="frame-loading" v-if="!preloadUrl || loading">
         <div class="loading-spinner"></div>
       </div>
     </div>
