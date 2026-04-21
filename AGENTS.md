@@ -62,6 +62,9 @@ ToolBox/
 │   │           ├── index.ts          # electronAPI Proxy 透传 + 导出
 │   │           └── logger.ts         # 插件/Shell 通用 Logger（createLogger）
 │   └── builtin/                      # 内置插件
+│       ├── pdf-merge/                # PDF 合并插件
+│       ├── pdf-split/                # PDF 拆分插件
+│       ├── pdf-editor/               # PDF 编辑插件
 │       └── welcome/                  # 欢迎页插件（示例）
 │           ├── manifest.json         # 插件元数据
 │           ├── package.json          # 独立 npm 包
@@ -173,6 +176,7 @@ plugins/
 1. `src/main/main.ts` — `ipcMain.handle('channel', handler)`
 2. `src/main/preload.ts` — `contextBridge.exposeInMainWorld` 中添加方法（返回 `Promise`）
 3. `plugins/shared/bridge/src/types.ts` — `ElectronAPI` 接口添加方法签名
+
 
 > `src/shell/types/global.d.ts` 和 `plugins/shared/bridge/src/index.ts` 均无需修改：前者直接 re-export bridge 类型，后者通过 Proxy 自动透传新方法。
 
