@@ -23,6 +23,11 @@ export type {
   SaveDialogReturnValue,
 } from './types';
 
+export { createLogger } from './logger';
+export type { Logger } from './logger';
+
+import { _setElectronAPI } from './logger';
+
 // ── 内部桥接实现 ──────────────────────────────────────────────────────────
 
 let _bridgeId = 0;
@@ -118,4 +123,10 @@ export const electronAPI: ElectronAPI = {
 
   getPathForFile: (file) =>
     callBridgeWithFile(file),
+
+  log: (level, tag, message) =>
+    callBridge('log', [level, tag, message]),
 };
+
+// 将 electronAPI 注入到 logger 模块（解除循环依赖）
+_setElectronAPI(electronAPI);

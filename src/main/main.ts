@@ -1,6 +1,18 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import {
+  initPipeGuard,
+  cleanOldLogs,
+  printStartupBanner,
+  createLogger,
+  writeRendererLog,
+} from './logger';
+
+// 尽早初始化管道保护（在任何 console 调用之前）
+initPipeGuard();
+
+const log = createLogger('Main');
 
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
@@ -122,9 +134,21 @@ ipcMain.handle('shell:openInExplorer', (_e, targetPath: string) =>
   shell.openPath(targetPath)
 );
 
+// 日志转发（渲染进程 / 插件 → 主进程写文件）
+ipcMain.handle(
+  'logger:log',
+  (_e, level: 'info' | 'warn' | 'error', tag: string, message: string) => {
+    writeRendererLog(level, tag, message);
+  }
+);
+
 // ─── 应用生命周期 ────────────────────────────────────────────
 
 app.whenReady().then(() => {
+  cleanOldLogs();
+  printStartupBanner();
+  log.info('应用初始化完成');
+
   createSplashWindow();
   createMainWindow();
 

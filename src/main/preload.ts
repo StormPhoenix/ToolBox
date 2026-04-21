@@ -30,4 +30,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 包为 Promise 以与 ElectronAPI 接口统一（bridge 侧也是 Promise<string>）
   getPathForFile: (file: File) =>
     Promise.resolve(webUtils.getPathForFile(file)),
+
+  // 渲染进程日志转发（Shell / 插件 → 主进程写文件）
+  log: (level: 'info' | 'warn' | 'error', tag: string, message: string) =>
+    ipcRenderer.invoke('logger:log', level, tag, message),
 });

@@ -110,4 +110,10 @@ export interface ElectronAPI {
    * bridge 层通过 postMessage 异步获取，统一为 Promise<string>。
    */
   getPathForFile(file: File): Promise<string>;
+
+  /**
+   * 将渲染进程（Shell / 插件）日志转发到主进程写文件。
+   * debug 级别在调用方已过滤，不应传入此方法。
+   */
+  log(level: 'info' | 'warn' | 'error', tag: string, message: string): Promise<void>;
 }

@@ -27,7 +27,8 @@ ToolBox/
 ├── src/
 │   ├── main/                         # Electron 主进程（Node.js 环境）
 │   │   ├── main.ts                   # 应用入口、窗口管理、所有 IPC handlers
-│   │   └── preload.ts                # contextBridge 安全 API 暴露
+│   │   ├── preload.ts                # contextBridge 安全 API 暴露
+│   │   └── logger.ts                 # 主进程日志工具（文件持久化、EPIPE 保护）
 │   ├── renderer/                     # 启动页（Splash Screen）
 │   │   ├── splash.html               # 启动页 HTML
 │   │   └── splash.css                # 启动页样式
@@ -47,6 +48,8 @@ ToolBox/
 │       ├── types/
 │       │   ├── index.ts              # PluginManifest、Category 类型
 │       │   └── global.d.ts           # Window.electronAPI 全局类型声明
+│       ├── utils/
+│       │   └── logger.ts             # Shell 渲染进程日志工具（转发至主进程）
 │       └── styles/
 │           └── global.css            # 全局 CSS Variables 设计系统
 ├── plugins/                          # 所有插件（pnpm workspace）
@@ -56,7 +59,8 @@ ToolBox/
 │   │       ├── tsconfig.json
 │   │       └── src/
 │   │           ├── types.ts          # ElectronAPI 接口【单一来源】
-│   │           └── index.ts          # callBridge 实现 + electronAPI 导出
+│   │           ├── index.ts          # callBridge 实现 + electronAPI 导出
+│   │           └── logger.ts         # 插件/Shell 通用 Logger（createLogger）
 │   └── builtin/                      # 内置插件
 │       └── welcome/                  # 欢迎页插件（示例）
 │           ├── manifest.json         # 插件元数据
@@ -161,6 +165,7 @@ plugins/
 | `readDir(path)` | `fs:readDir` | 列出目录内容 |
 | `openInExplorer(path)` | `shell:openInExplorer` | 在资源管理器中打开 |
 | `getPathForFile(file)` | —（preload `webUtils`） | 获取 File 对象的系统路径 |
+| `log(level, tag, message)` | `logger:log` | 渲染进程/插件日志转发到主进程写文件 |
 
 **新增 IPC 通道四步骤（含 bridge 同步）：**
 1. `src/main/main.ts` — `ipcMain.handle('channel', handler)`
