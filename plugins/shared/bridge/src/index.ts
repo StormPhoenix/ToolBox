@@ -1,9 +1,9 @@
 /**
  * @toolbox/bridge
  *
- * 为插件 iframe 提供与 Shell 侧完全一致签名的 electronAPI 对象。
- * 内部通过 postMessage 将调用转发给父框架（ToolViewer.vue），
- * 由 Shell 代理调用真正的 window.electronAPI，再将结果回传。
+ * 为插件提供 electronAPI 访问入口。
+ * 插件运行在独立 BrowserWindow 中，preload.js 已注入 window.electronAPI，
+ * 此模块直接将其导出，插件无需感知 Electron 细节。
  *
  * 使用方式：
  *   import { electronAPI } from '@toolbox/bridge';
@@ -28,105 +28,29 @@ export type { Logger } from './logger';
 
 import { _setElectronAPI } from './logger';
 
-// ── 内部桥接实现 ──────────────────────────────────────────────────────────
+// ── electronAPI 直接代理 window.electronAPI ───────────────────────────────
+//
+// 插件窗口由主进程以独立 BrowserWindow 创建，使用与 Shell 相同的 preload.js，
+// 因此 window.electronAPI 已由 contextBridge 注入，可直接使用。
+// 使用 Proxy 实现懒访问：模块加载时 window.electronAPI 可能尚未就绪，
+// 实际调用时（DOMContentLoaded 后）已完成注入。
 
-let _bridgeId = 0;
-
-/** 生成全局唯一的请求 ID */
-function nextId(): string {
-  return `tb_${++_bridgeId}_${Date.now()}`;
-}
-
-/**
- * 通用桥接调用：将方法名和参数通过 postMessage 发给 Shell，等待回复。
- */
-function callBridge<T>(method: string, args: unknown[] = []): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const id = nextId();
-
-    function onMessage(event: MessageEvent): void {
-      const { __toolboxBridge, id: mid, result, error } = (event.data ?? {}) as Record<string, unknown>;
-      if (!__toolboxBridge || mid !== id) return;
-      window.removeEventListener('message', onMessage);
-      if (error) reject(new Error(error as string));
-      else resolve(result as T);
+export const electronAPI: ElectronAPI = new Proxy({} as ElectronAPI, {
+  get(_target, prop: string) {
+    const api = (window as Window & { electronAPI?: ElectronAPI }).electronAPI;
+    if (!api) {
+      throw new Error(
+        `[toolbox/bridge] window.electronAPI 未就绪（属性：${prop}）。` +
+        '请确保插件由主进程以独立 BrowserWindow 打开，且使用了正确的 preload.js。'
+      );
     }
-
-    window.addEventListener('message', onMessage);
-
-    window.parent.postMessage(
-      { __toolboxBridge: true, id, method, args },
-      '*'
-    );
-
-    setTimeout(() => {
-      window.removeEventListener('message', onMessage);
-      reject(new Error(`[toolbox-bridge] timeout: ${method}`));
-    }, 30_000);
-  });
-}
-
-/**
- * 专用于 getPathForFile：File 对象不可经由普通序列化传递，
- * 直接挂在 postMessage data 的 file 字段上，Shell 侧读取后
- * 同步调用 webUtils.getPathForFile(file)。
- */
-function callBridgeWithFile(file: File): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const id = nextId();
-
-    function onMessage(event: MessageEvent): void {
-      const { __toolboxBridge, id: mid, result, error } = (event.data ?? {}) as Record<string, unknown>;
-      if (!__toolboxBridge || mid !== id) return;
-      window.removeEventListener('message', onMessage);
-      if (error) reject(new Error(error as string));
-      else resolve(result as string);
+    const value = (api as unknown as Record<string, unknown>)[prop];
+    if (typeof value === 'function') {
+      return value.bind(api);
     }
-
-    window.addEventListener('message', onMessage);
-
-    window.parent.postMessage(
-      { __toolboxBridge: true, id, method: 'getPathForFile', file },
-      '*'
-    );
-
-    setTimeout(() => {
-      window.removeEventListener('message', onMessage);
-      reject(new Error('[toolbox-bridge] timeout: getPathForFile'));
-    }, 5_000);
-  });
-}
-
-// ── 对外导出的 electronAPI 对象 ───────────────────────────────────────────
-
-export const electronAPI: ElectronAPI = {
-  getAppInfo: () =>
-    callBridge('getAppInfo'),
-
-  showOpenDialog: (options?) =>
-    callBridge('showOpenDialog', [options]),
-
-  showSaveDialog: (options?) =>
-    callBridge('showSaveDialog', [options]),
-
-  readFile: (filePath, encoding?) =>
-    callBridge('readFile', [filePath, encoding]),
-
-  writeFile: (filePath, data, encoding?) =>
-    callBridge('writeFile', [filePath, data, encoding]),
-
-  readDir: (dirPath) =>
-    callBridge('readDir', [dirPath]),
-
-  openInExplorer: (targetPath) =>
-    callBridge('openInExplorer', [targetPath]),
-
-  getPathForFile: (file) =>
-    callBridgeWithFile(file),
-
-  log: (level, tag, message) =>
-    callBridge('log', [level, tag, message]),
-};
+    return value;
+  },
+});
 
 // 将 electronAPI 注入到 logger 模块（解除循环依赖）
 _setElectronAPI(electronAPI);

@@ -11,93 +11,54 @@
         <span class="title-name">{{ plugin.name }}</span>
       </div>
       <div class="toolbar-spacer"></div>
+      <button class="focus-btn" @click="focusWindow" title="聚焦插件窗口">
+        <span>⬡</span>
+        <span>切换到窗口</span>
+      </button>
     </div>
 
-    <!-- iframe 容器 -->
-    <div class="iframe-wrapper">
-      <iframe
-        ref="frameRef"
-        class="plugin-frame"
-        :src="pluginUrl"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
-        allowtransparency="true"
-        @load="onLoad"
-      />
-      <!-- 加载遮罩 -->
-      <div class="frame-loading" v-if="loading">
-        <div class="loading-spinner"></div>
+    <!-- 占位区：插件运行在独立窗口中 -->
+    <div class="plugin-placeholder">
+      <div class="placeholder-icon">{{ plugin.icon }}</div>
+      <h2 class="placeholder-title">{{ plugin.name }}</h2>
+      <p class="placeholder-desc">{{ plugin.description }}</p>
+      <div class="placeholder-actions">
+        <button class="action-btn action-btn--primary" @click="openWindow">
+          打开工具窗口
+        </button>
+        <button class="action-btn action-btn--secondary" @click="$emit('back')">
+          返回工具列表
+        </button>
       </div>
+      <p class="placeholder-hint">插件在独立窗口中运行，可与主界面同时使用</p>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { onMounted } from 'vue';
 import type { PluginManifest } from '../types';
+import type { ElectronAPI } from '@toolbox/bridge';
 
 const props = defineProps<{ plugin: PluginManifest }>();
 defineEmits<{ back: [] }>();
 
-const frameRef = ref<HTMLIFrameElement | null>(null);
-const loading = ref(true);
+/** Shell 渲染进程中 electronAPI 由 preload contextBridge 注入 */
+const api = (globalThis as unknown as { electronAPI: ElectronAPI }).electronAPI;
 
-const pluginUrl = computed(() =>
-  `../../plugins/builtin/${props.plugin.id}/dist/${props.plugin.entry}`
-);
-
-function onLoad() {
-  loading.value = false;
+function openWindow(): void {
+  // entryPath 传空字符串，由主进程按约定目录自动推导
+  api.openPlugin(props.plugin.id, '', props.plugin.name);
 }
 
-// ── Shell → 插件 electronAPI 代理 ──────────────────────────
-// 插件 iframe 无法直接访问 preload 注入的 electronAPI，
-// 通过 postMessage 桥接：插件发请求 → Shell 调用 electronAPI → 把结果发回插件
-//
-// 特殊情况：getPathForFile 接收 File 对象（不可序列化），
-// 插件需通过 MessageChannel port 的 transfer 机制传递 File。
-
-async function handlePluginMessage(event: MessageEvent) {
-  const frame = frameRef.value;
-  if (!frame || event.source !== frame.contentWindow) return;
-
-  const { __toolboxBridge, id, method, args, file } = event.data ?? {};
-  if (!__toolboxBridge || !id || !method) return;
-
-  const api = (window as any).electronAPI;
-
-  try {
-    let result: unknown;
-
-    if (method === 'getPathForFile') {
-      // File 对象通过 postMessage data.file 传入。
-      // 注意：跨 iframe 的 instanceof File 会失败（不同 realm 的构造函数），
-      // 改用 duck typing 检查 name/size/arrayBuffer 字段。
-      if (!file || typeof file.name !== 'string' || typeof file.size !== 'number') {
-        throw new Error('getPathForFile: no File object received');
-      }
-      // preload 侧现已包为 Promise，必须 await
-      result = await api.getPathForFile(file);
-    } else {
-      if (!api || typeof api[method] !== 'function') {
-        throw new Error(`electronAPI.${method} not found`);
-      }
-      result = await api[method](...(args ?? []));
-    }
-
-    frame.contentWindow?.postMessage(
-      { __toolboxBridge: true, id, result },
-      '*'
-    );
-  } catch (e: any) {
-    frame.contentWindow?.postMessage(
-      { __toolboxBridge: true, id, error: e?.message ?? String(e) },
-      '*'
-    );
-  }
+function focusWindow(): void {
+  api.focusPlugin(props.plugin.id);
 }
 
-onMounted(() => window.addEventListener('message', handlePluginMessage));
-onUnmounted(() => window.removeEventListener('message', handlePluginMessage));
+// 进入 ToolViewer 时自动打开插件窗口
+onMounted(() => {
+  openWindow();
+});
 </script>
 
 <style scoped>
@@ -119,7 +80,8 @@ onUnmounted(() => window.removeEventListener('message', handlePluginMessage));
   background: var(--bg-sidebar);
 }
 
-.back-btn {
+.back-btn,
+.focus-btn {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -132,7 +94,8 @@ onUnmounted(() => window.removeEventListener('message', handlePluginMessage));
   font-size: 0.82rem;
   transition: color var(--transition), border-color var(--transition);
 }
-.back-btn:hover {
+.back-btn:hover,
+.focus-btn:hover {
   color: var(--text-primary);
   border-color: var(--accent);
 }
@@ -148,41 +111,76 @@ onUnmounted(() => window.removeEventListener('message', handlePluginMessage));
 
 .toolbar-spacer { flex: 1; }
 
-/* iframe */
-.iframe-wrapper {
+/* 占位区 */
+.plugin-placeholder {
   flex: 1;
-  position: relative;
-  overflow: hidden;
-}
-
-.plugin-frame {
-  width: 100%;
-  height: 100%;
-  border: none;
-  background: var(--bg-content);
-  display: block;
-}
-
-/* 加载遮罩 */
-.frame-loading {
-  position: absolute;
-  inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 16px;
+  padding: 48px 32px;
   background: var(--bg-content);
+  text-align: center;
 }
 
-.loading-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+.placeholder-icon {
+  font-size: 4rem;
+  line-height: 1;
+  opacity: 0.7;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.placeholder-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.placeholder-desc {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  max-width: 360px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.placeholder-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.action-btn {
+  padding: 9px 22px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.action-btn--primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.action-btn--primary:hover {
+  background: #5a4bd1;
+}
+
+.action-btn--secondary {
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+.action-btn--secondary:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.placeholder-hint {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin: 0;
 }
 </style>

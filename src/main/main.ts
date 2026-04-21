@@ -17,6 +17,9 @@ const log = createLogger('Main');
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
 
+/** 已打开的插件窗口：pluginId → BrowserWindow */
+const pluginWindows = new Map<string, BrowserWindow>();
+
 const SPLASH_MIN_DURATION = 2500;
 const isDev = process.argv.includes('--dev');
 
@@ -103,13 +106,15 @@ ipcMain.handle('get-app-info', () => ({
 }));
 
 // 文件对话框
-ipcMain.handle('dialog:showOpenDialog', (_e, options: Electron.OpenDialogOptions) =>
-  dialog.showOpenDialog(mainWindow!, options)
-);
+ipcMain.handle('dialog:showOpenDialog', (e, options: Electron.OpenDialogOptions) => {
+  const win = BrowserWindow.fromWebContents(e.sender) ?? mainWindow!;
+  return dialog.showOpenDialog(win, options);
+});
 
-ipcMain.handle('dialog:showSaveDialog', (_e, options: Electron.SaveDialogOptions) =>
-  dialog.showSaveDialog(mainWindow!, options)
-);
+ipcMain.handle('dialog:showSaveDialog', (e, options: Electron.SaveDialogOptions) => {
+  const win = BrowserWindow.fromWebContents(e.sender) ?? mainWindow!;
+  return dialog.showSaveDialog(win, options);
+});
 
 // 文件系统
 ipcMain.handle('fs:readFile', async (_e, filePath: string, encoding: BufferEncoding | 'base64' = 'utf-8') => {
@@ -141,6 +146,75 @@ ipcMain.handle(
     writeRendererLog(level, tag, message);
   }
 );
+
+// ── 插件窗口管理 ─────────────────────────────────────────────
+
+/**
+ * 打开（或聚焦）一个插件独立窗口。
+ * @param pluginId  插件唯一标识
+ * @param entryPath 插件 dist/index.html 的绝对路径（可选，不传则由主进程自动推导）
+ * @param title     窗口标题
+ */
+ipcMain.handle(
+  'plugin:open',
+  (_e, pluginId: string, entryPath: string, title: string) => {
+    // 若窗口已存在则直接聚焦
+    const existing = pluginWindows.get(pluginId);
+    if (existing && !existing.isDestroyed()) {
+      if (existing.isMinimized()) existing.restore();
+      existing.focus();
+      return;
+    }
+
+    // 若调用方未传入绝对路径，则由主进程根据约定目录推导
+    const resolvedPath = entryPath || path.join(
+      __dirname, '..', '..', 'plugins', 'builtin', pluginId, 'dist', 'index.html'
+    );
+
+    const win = new BrowserWindow({
+      width: 1100,
+      height: 780,
+      minWidth: 720,
+      minHeight: 500,
+      title,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+
+    // 隐藏默认菜单栏
+    win.setMenuBarVisibility(false);
+
+    win.loadFile(resolvedPath);
+
+    pluginWindows.set(pluginId, win);
+
+    win.on('closed', () => {
+      pluginWindows.delete(pluginId);
+    });
+
+    log.info(`插件窗口已打开：${pluginId}`);
+  }
+);
+
+/** 关闭指定插件窗口（如果已打开） */
+ipcMain.handle('plugin:close', (_e, pluginId: string) => {
+  const win = pluginWindows.get(pluginId);
+  if (win && !win.isDestroyed()) {
+    win.close();
+  }
+});
+
+/** 聚焦指定插件窗口（如果已打开） */
+ipcMain.handle('plugin:focus', (_e, pluginId: string) => {
+  const win = pluginWindows.get(pluginId);
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  }
+});
 
 // ─── 应用生命周期 ────────────────────────────────────────────
 

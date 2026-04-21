@@ -34,4 +34,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 渲染进程日志转发（Shell / 插件 → 主进程写文件）
   log: (level: 'info' | 'warn' | 'error', tag: string, message: string) =>
     ipcRenderer.invoke('logger:log', level, tag, message),
+
+  // 插件窗口管理（Shell 侧调用）
+  openPlugin: (pluginId: string, entryPath: string, title: string) =>
+    ipcRenderer.invoke('plugin:open', pluginId, entryPath, title),
+
+  closePlugin: (pluginId: string) =>
+    ipcRenderer.invoke('plugin:close', pluginId),
+
+  focusPlugin: (pluginId: string) =>
+    ipcRenderer.invoke('plugin:focus', pluginId),
 });

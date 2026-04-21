@@ -40,7 +40,7 @@ ToolBox/
 │       │   ├── Sidebar.vue           # 左侧分类导航栏（支持折叠）
 │       │   ├── PluginCard.vue        # 单个工具卡片
 │       │   ├── ToolGrid.vue          # 工具网格列表
-│       │   └── ToolViewer.vue        # iframe 插件查看器
+│       │   └── ToolViewer.vue        # 插件查看器（打开独立窗口 + 占位界面）
 │       ├── composables/
 │       │   └── usePlugins.ts         # 插件注册表状态管理 composable
 │       ├── data/
@@ -59,7 +59,7 @@ ToolBox/
 │   │       ├── tsconfig.json
 │   │       └── src/
 │   │           ├── types.ts          # ElectronAPI 接口【单一来源】
-│   │           ├── index.ts          # callBridge 实现 + electronAPI 导出
+│   │           ├── index.ts          # electronAPI 导出（Proxy 代理 window.electronAPI）
 │   │           └── logger.ts         # 插件/Shell 通用 Logger（createLogger）
 │   └── builtin/                      # 内置插件
 │       └── welcome/                  # 欢迎页插件（示例）
@@ -101,7 +101,7 @@ ToolBox/
 | **主进程** | `src/main/main.ts` | Node.js | CommonJS |
 | **预加载脚本** | `src/main/preload.ts` | 隔离沙箱 | CommonJS |
 | **Shell（主界面）** | `src/shell/` | Chromium + Vue 3 | ES Modules |
-| **插件** | `plugins/<scope>/<id>/` | iframe 隔离 Chromium | ES Modules |
+| **插件** | `plugins/<scope>/<id>/` | 独立 BrowserWindow + Chromium | ES Modules |
 
 ### 3.2 插件系统
 
@@ -139,14 +139,15 @@ plugins/
 
 1. **构建时**：`pnpm build:registry` 扫描所有 `manifest.json` → 生成 `dist/plugin-registry.json`
 2. **运行时**：Shell 启动后通过 `fetch` 加载 `plugin-registry.json`，填充侧边栏和工具列表
-3. **执行时**：用户点击工具卡片 → `ToolViewer` 在 `<iframe>` 中加载插件 `dist/index.html`
-4. **iframe 路径**：`../../plugins/builtin/<id>/dist/<entry>`（相对于 `dist/shell/index.html`）
+3. **执行时**：用户点击工具卡片 → `ToolViewer` 调用 `window.electronAPI.openPlugin()` → 主进程创建独立 `BrowserWindow` 加载插件 `dist/index.html`
+4. **插件窗口**：主进程使用同一 `preload.js` 注入 `window.electronAPI`，插件通过 `@toolbox/bridge` 直接访问系统 API
+5. **多开保护**：同一插件已有窗口时，`openPlugin` 自动聚焦而不重复创建
 
 ### 3.4 Electron 安全规则（强制）
 
 - `nodeIntegration: false`、`contextIsolation: true` — 所有窗口必须
 - 跨进程通信 **只能** 通过 `contextBridge` + `ipcMain.handle` / `ipcRenderer.invoke`
-- iframe `sandbox` 属性：`allow-scripts allow-same-origin allow-forms allow-modals`
+- 插件窗口与 Shell 使用同一 `preload.js`，`window.electronAPI` 由 `contextBridge` 注入
 - HTML 必须包含 `Content-Security-Policy` meta 标签
 
 ---
@@ -166,16 +167,17 @@ plugins/
 | `openInExplorer(path)` | `shell:openInExplorer` | 在资源管理器中打开 |
 | `getPathForFile(file)` | —（preload `webUtils`） | 获取 File 对象的系统路径 |
 | `log(level, tag, message)` | `logger:log` | 渲染进程/插件日志转发到主进程写文件 |
+| `openPlugin(id, path, title)` | `plugin:open` | 打开（或聚焦）插件独立窗口（仅 Shell 使用） |
+| `closePlugin(id)` | `plugin:close` | 关闭指定插件窗口（仅 Shell 使用） |
+| `focusPlugin(id)` | `plugin:focus` | 聚焦指定插件窗口（仅 Shell 使用） |
 
-**新增 IPC 通道四步骤（含 bridge 同步）：**
+**新增 IPC 通道三步骤：**
 1. `src/main/main.ts` — `ipcMain.handle('channel', handler)`
 2. `src/main/preload.ts` — `contextBridge.exposeInMainWorld` 中添加方法（返回 `Promise`）
 3. `plugins/shared/bridge/src/types.ts` — `ElectronAPI` 接口添加方法签名
-4. `plugins/shared/bridge/src/index.ts` — `electronAPI` 对象添加对应方法（调用 `callBridge`）
 
 > `src/shell/types/global.d.ts` 无需修改，它直接 re-export bridge 的类型。
-
-详细说明见 [`docs/plugin-bridge.md`](docs/plugin-bridge.md)。
+> `plugins/shared/bridge/src/index.ts` 无需修改，它通过 Proxy 自动代理所有 `window.electronAPI` 方法。
 
 ---
 
@@ -363,10 +365,11 @@ const result = await electronAPI.showOpenDialog({ properties: ['openFile'] });
 ## 10. 重要提醒
 
 - ⚠️ `pnpm-workspace.yaml` 中 `allowBuilds.electron: true` — 必须保持，否则 Electron 无法安装
-- ⚠️ 插件 `vite.config.ts` 必须设置 `base: './'` — 否则 iframe 加载时资源路径错误
+- ⚠️ 插件 `vite.config.ts` 必须设置 `base: './'` — 否则插件窗口加载时资源路径错误
 - ⚠️ 新增插件后必须重新运行 `pnpm build:registry` — 否则注册表不会包含新插件
 - ⚠️ Shell 的 `dist/shell/index.html` 由 Vite 构建输出，`main.ts` 中的 `"main"` 字段指向 `dist/main/main.js`
-- ⚠️ **插件禁止直接使用 `window.electronAPI`**（插件 iframe 内该值为 `undefined`），必须通过 `@toolbox/bridge` 的 `electronAPI` 对象访问系统能力
+- ⚠️ **插件可直接使用 `window.electronAPI`**，也可通过 `@toolbox/bridge` 的 `electronAPI` 对象（推荐，类型安全）
 - ⚠️ **`ElectronAPI` 接口的唯一来源是 `plugins/shared/bridge/src/types.ts`** — 禁止在其他位置重复定义，`src/shell/types/global.d.ts` 只做 re-export
-- ⚠️ **新增 IPC 方法后必须同步更新 bridge 包**（`types.ts` + `index.ts`），否则插件侧无法使用新方法
+- ⚠️ **新增 IPC 方法后只需更新 `types.ts`**，`bridge/index.ts` 的 Proxy 实现自动代理新方法，无需额外修改
 - ⚠️ **preload 中所有 `ElectronAPI` 方法必须返回 `Promise`** — 包括同步实现也需包为 `Promise.resolve(...)`，以保证签名一致性
+- ⚠️ **对话框 IPC 从事件来源确定父窗口**（`BrowserWindow.fromWebContents(e.sender)`）— 插件窗口弹出的对话框将正确附着在插件窗口上
