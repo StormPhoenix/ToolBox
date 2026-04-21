@@ -1,0 +1,10 @@
+{
+  "id": "pdf-split",
+  "name": "PDF 拆分",
+  "description": "将 PDF 按固定页数或自定义范围拆分为多个文件",
+  "category": "file",
+  "icon": "✂️",
+  "entry": "index.html",
+  "version": "1.0.0",
+  "builtin": true
+}

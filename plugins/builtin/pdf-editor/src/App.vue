@@ -16,11 +16,11 @@
         <template v-if="pdfDoc">
           <button
             class="btn btn-danger"
-            :disabled="removedCount === 0"
-            @click="undoAllRemove"
-            title="撤销所有移除操作"
+            :disabled="!hasModifications"
+            @click="onRevertAll"
+            title="撤销所有修改（删除与插入）"
           >
-            ↩ 撤销移除（{{ removedCount }}）
+            ↩ 撤销修改
           </button>
           <button
             class="btn btn-primary"
@@ -61,6 +61,7 @@
           :pdfDoc="pdfDoc"
           @select="selectPage"
           @contextmenu="onThumbContextMenu"
+          @revert="onRevertPage"
         />
 
         <PreviewArea
@@ -79,7 +80,14 @@
     <ContextMenu
       ref="ctxMenuRef"
       @remove="onRemovePage"
+      @insert="onInsertPage"
     />
+
+    <!-- 插入图片弹窗 -->
+    <InsertImageDialog ref="insertImageDialogRef" />
+
+    <!-- 插入 PDF 弹窗 -->
+    <InsertPdfDialog ref="insertPdfDialogRef" />
 
     <!-- Toast 提示 -->
     <Transition name="toast">
@@ -96,10 +104,18 @@ import { ref, reactive, computed } from 'vue';
 import ThumbnailPanel from './components/ThumbnailPanel.vue';
 import PreviewArea from './components/PreviewArea.vue';
 import ContextMenu from './components/ContextMenu.vue';
+import InsertImageDialog from './components/InsertImageDialog.vue';
+import InsertPdfDialog from './components/InsertPdfDialog.vue';
 import {
   importFromDialog,
   importFromDrop,
   markPageRemoved,
+  revertPage,
+  revertAll,
+  insertPage,
+  getNeighborPageSize,
+  pickImageFile,
+  pickInsertPdfFile,
   savePdf,
   saveAsPdf,
 } from './composables/usePdf';
@@ -110,12 +126,14 @@ import {
   activePageIndex,
   isDirty,
   visiblePages,
+  hasModifications,
 } from './store/pdfState';
+import type { InsertPosition, InsertType } from './composables/usePdf';
 
-// ── 右键菜单引用 ──
+// ── refs ──
 const ctxMenuRef = ref<InstanceType<typeof ContextMenu> | null>(null);
-
-// ── 保存状态 ──
+const insertImageDialogRef = ref<InstanceType<typeof InsertImageDialog> | null>(null);
+const insertPdfDialogRef = ref<InstanceType<typeof InsertPdfDialog> | null>(null);
 const saving = ref(false);
 
 // ── Toast ──
@@ -131,7 +149,6 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
 }
 
 // ── 计算属性 ──
-const removedCount = computed(() => pages.value.filter(p => p.removed).length);
 
 const visibleActiveIndex = computed(() => {
   const active = pages.value[activePageIndex.value];
@@ -145,61 +162,128 @@ const currentVisiblePage = computed(() => {
   return active;
 });
 
-// ── 事件处理 ──
-function selectPage(index: number) {
+// ── 页面选择 / 导航 ──
+
+function selectPage(index: number): void {
   activePageIndex.value = index;
 }
 
-function onThumbContextMenu(event: MouseEvent, index: number) {
-  ctxMenuRef.value?.open(event, index);
-}
-
-function onRemovePage(pageIndex: number) {
-  markPageRemoved(pageIndex);
-}
-
-function goPrev() {
+function goPrev(): void {
   const idx = visibleActiveIndex.value;
   if (idx <= 0) return;
   const prev = visiblePages.value[idx - 1];
   activePageIndex.value = pages.value.indexOf(prev);
 }
 
-function goNext() {
+function goNext(): void {
   const idx = visibleActiveIndex.value;
   if (idx >= visiblePages.value.length - 1) return;
   const next = visiblePages.value[idx + 1];
   activePageIndex.value = pages.value.indexOf(next);
 }
 
-async function onDrop(event: DragEvent) {
+// ── 右键菜单 ──
+
+function onThumbContextMenu(event: MouseEvent, index: number): void {
+  ctxMenuRef.value?.open(event, index);
+}
+
+function onRemovePage(pageIndex: number): void {
+  markPageRemoved(pageIndex);
+}
+
+function onRevertPage(pageIndex: number): void {
+  revertPage(pageIndex);
+}
+
+function onRevertAll(): void {
+  revertAll();
+}
+
+// ── 插入操作 ──
+
+async function onInsertPage(pageIndex: number, position: InsertPosition, type: InsertType): Promise<void> {
+  if (type === 'blank') {
+    await doInsertBlank(pageIndex, position);
+  } else if (type === 'image') {
+    await doInsertImage(pageIndex, position);
+  } else if (type === 'pdf') {
+    await doInsertPdf(pageIndex, position);
+  }
+}
+
+async function doInsertBlank(pageIndex: number, position: InsertPosition): Promise<void> {
+  insertPage(pageIndex, position, { kind: 'blank' });
+  showToast('✅ 已插入空白页');
+}
+
+async function doInsertImage(pageIndex: number, position: InsertPosition): Promise<void> {
+  // 1. 弹出文件选择
+  const file = await pickImageFile();
+  if (!file) return;
+
+  // 2. 弹出尺寸选择弹窗
+  const result = await insertImageDialogRef.value?.open(file) ?? null;
+  if (!result) return;
+
+  // 3. 如果是 match-neighbor，提前获取邻居页尺寸（存入 file 的元数据，保存时再用）
+  const objectUrl = URL.createObjectURL(result.file);
+
+  insertPage(pageIndex, position, {
+    kind: 'image',
+    file: result.file,
+    objectUrl,
+    sizeMode: result.sizeMode,
+  });
+  showToast('✅ 已插入图片页');
+}
+
+async function doInsertPdf(pageIndex: number, position: InsertPosition): Promise<void> {
+  // 1. 弹出文件选择
+  const picked = await pickInsertPdfFile();
+  if (!picked) return;
+
+  // 2. 弹出页面范围选择弹窗
+  const result = await insertPdfDialogRef.value?.open(picked.bytes, picked.name) ?? null;
+  if (!result) return;
+
+  insertPage(pageIndex, position, {
+    kind: 'pdf',
+    sourceBytes: result.sourceBytes,
+    sourcePageIndices: result.indices,
+  });
+  showToast(`✅ 已插入 ${result.indices.length} 个 PDF 页`);
+}
+
+// ── 拖拽导入 ──
+
+async function onDrop(event: DragEvent): Promise<void> {
   await importFromDrop(event);
 }
 
-function undoAllRemove() {
-  pages.value.forEach(p => { p.removed = false; });
-  isDirty.value = false;
-}
+// ── 保存 ──
 
-async function onSave() {
+async function onSave(): Promise<void> {
   saving.value = true;
   try {
     const ok = await savePdf();
     if (ok) showToast('✅ 保存成功');
-  } catch (e: any) {
-    showToast(`❌ 保存失败：${e?.message ?? '未知错误'}`, 'error');
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : '未知错误';
+    showToast(`❌ 保存失败：${msg}`, 'error');
   } finally {
     saving.value = false;
   }
 }
 
-async function onSaveAs() {
+async function onSaveAs(): Promise<void> {
   saving.value = true;
   try {
     const ok = await saveAsPdf();
     if (ok) showToast('✅ 另存为成功');
-  } catch (e: any) {
-    showToast(`❌ 保存失败：${e?.message ?? '未知错误'}`, 'error');
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : '未知错误';
+    showToast(`❌ 保存失败：${msg}`, 'error');
   } finally {
     saving.value = false;
   }
@@ -364,21 +448,9 @@ body {
   background: rgba(108, 92, 231, 0.04);
 }
 
-.drop-icon {
-  font-size: 3rem;
-  opacity: 0.5;
-}
-
-.drop-title {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-dim);
-}
-
-.drop-hint {
-  font-size: 0.8rem;
-  color: #555570;
-}
+.drop-icon { font-size: 3rem; opacity: 0.5; }
+.drop-title { font-size: 1rem; font-weight: 600; color: var(--text-dim); }
+.drop-hint { font-size: 0.8rem; color: #555570; }
 
 /* ── Toast ── */
 .toast {
