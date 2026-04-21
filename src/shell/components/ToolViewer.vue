@@ -11,6 +11,10 @@
         <span class="title-name">{{ plugin.name }}</span>
       </div>
       <div class="toolbar-spacer"></div>
+      <button class="devtools-btn" title="打开插件 DevTools" @click="openDevTools">
+        <span>⚙</span>
+        <span>DevTools</span>
+      </button>
     </div>
 
     <!-- webview 容器 -->
@@ -18,6 +22,7 @@
       <!-- preloadUrl 就绪后才渲染 webview，确保 preload 脚本被正确注入 -->
       <webview
         v-if="preloadUrl"
+        ref="webviewRef"
         class="plugin-frame"
         :src="pluginUrl"
         :preload="preloadUrl"
@@ -40,6 +45,7 @@ import type { ElectronAPI } from '../types/global.d.ts';
 const props = defineProps<{ plugin: PluginManifest }>();
 defineEmits<{ back: [] }>();
 
+const webviewRef = ref<{ openDevTools(): void } | null>(null);
 const loading = ref(true);
 const preloadUrl = ref('');
 
@@ -53,6 +59,10 @@ function onLoad(): void {
 
 function onLoadError(): void {
   loading.value = false;
+}
+
+function openDevTools(): void {
+  webviewRef.value?.openDevTools();
 }
 
 // 从主进程获取 preload 绝对路径，转换为 file:// URL 供 webview 使用
@@ -111,6 +121,24 @@ onMounted(async () => {
 .title-icon { font-size: 1.1rem; }
 
 .toolbar-spacer { flex: 1; }
+
+.devtools-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.78rem;
+  transition: color var(--transition), border-color var(--transition);
+}
+.devtools-btn:hover {
+  color: var(--accent-light);
+  border-color: var(--accent);
+}
 
 /* webview 容器（类名保持 iframe-wrapper / plugin-frame 以兼容外部引用） */
 .iframe-wrapper {
