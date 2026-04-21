@@ -40,7 +40,7 @@ ToolBox/
 │       │   ├── Sidebar.vue           # 左侧分类导航栏（支持折叠）
 │       │   ├── PluginCard.vue        # 单个工具卡片
 │       │   ├── ToolGrid.vue          # 工具网格列表
-│       │   └── ToolViewer.vue        # iframe 插件查看器
+│       │   └── ToolViewer.vue        # webview 插件查看器
 │       ├── composables/
 │       │   └── usePlugins.ts         # 插件注册表状态管理 composable
 │       ├── data/
@@ -59,7 +59,7 @@ ToolBox/
 │   │       ├── tsconfig.json
 │   │       └── src/
 │   │           ├── types.ts          # ElectronAPI 接口【单一来源】
-│   │           ├── index.ts          # callBridge 实现 + electronAPI 导出
+│   │           ├── index.ts          # electronAPI Proxy 透传 + 导出
 │   │           └── logger.ts         # 插件/Shell 通用 Logger（createLogger）
 │   └── builtin/                      # 内置插件
 │       └── welcome/                  # 欢迎页插件（示例）
@@ -101,7 +101,7 @@ ToolBox/
 | **主进程** | `src/main/main.ts` | Node.js | CommonJS |
 | **预加载脚本** | `src/main/preload.ts` | 隔离沙箱 | CommonJS |
 | **Shell（主界面）** | `src/shell/` | Chromium + Vue 3 | ES Modules |
-| **插件** | `plugins/<scope>/<id>/` | iframe 隔离 Chromium | ES Modules |
+| **插件** | `plugins/<scope>/<id>/` | webview 独立 Chromium 渲染进程 | ES Modules |
 
 ### 3.2 插件系统
 
@@ -139,25 +139,27 @@ plugins/
 
 1. **构建时**：`pnpm build:registry` 扫描所有 `manifest.json` → 生成 `dist/plugin-registry.json`
 2. **运行时**：Shell 启动后通过 `fetch` 加载 `plugin-registry.json`，填充侧边栏和工具列表
-3. **执行时**：用户点击工具卡片 → `ToolViewer` 在 `<iframe>` 中加载插件 `dist/index.html`
-4. **iframe 路径**：`../../plugins/builtin/<id>/dist/<entry>`（相对于 `dist/shell/index.html`）
+3. **执行时**：用户点击工具卡片 → `ToolViewer` 在 `<webview>` 中加载插件 `dist/index.html`
+4. **webview 路径**：`../../plugins/builtin/<id>/dist/<entry>`（相对于 `dist/shell/index.html`）
+5. **preload 注入**：`ToolViewer` 通过 `get-preload-path` IPC 获取 preload 绝对路径，设置到 `<webview preload="...">` 属性，插件内 `window.electronAPI` 直接可用
 
 ### 3.4 Electron 安全规则（强制）
 
 - `nodeIntegration: false`、`contextIsolation: true` — 所有窗口必须
 - 跨进程通信 **只能** 通过 `contextBridge` + `ipcMain.handle` / `ipcRenderer.invoke`
-- iframe `sandbox` 属性：`allow-scripts allow-same-origin allow-forms allow-modals`
+- `webviewTag: true` — 仅 mainWindow 启用，用于插件渲染
 - HTML 必须包含 `Content-Security-Policy` meta 标签
 
 ---
 
 ## 4. IPC API 完整列表
 
-所有 API 通过 `window.electronAPI.*` 调用（Shell 侧），或通过 `import { electronAPI } from '@toolbox/bridge'` 调用（插件侧）。接口类型定义的**单一来源**为 `plugins/shared/bridge/src/types.ts`，由 `src/shell/types/global.d.ts` re-export 到全局。
+所有 API 通过 `window.electronAPI.*` 调用（Shell 侧），或通过 `import { electronAPI } from '@toolbox/bridge'` 调用（插件侧，底层透传 webview 内的 `window.electronAPI`）。接口类型定义的**单一来源**为 `plugins/shared/bridge/src/types.ts`，由 `src/shell/types/global.d.ts` re-export 到全局。
 
 | 方法 | IPC 通道 | 说明 |
 |------|----------|------|
 | `getAppInfo()` | `get-app-info` | 获取应用/环境信息 |
+| `getPreloadPath()` | `get-preload-path` | 获取 preload 脚本绝对路径（供 webview 使用） |
 | `showOpenDialog(options?)` | `dialog:showOpenDialog` | 打开文件选择对话框 |
 | `showSaveDialog(options?)` | `dialog:showSaveDialog` | 打开文件保存对话框 |
 | `readFile(path, encoding?)` | `fs:readFile` | 读取文件内容 |
@@ -167,13 +169,12 @@ plugins/
 | `getPathForFile(file)` | —（preload `webUtils`） | 获取 File 对象的系统路径 |
 | `log(level, tag, message)` | `logger:log` | 渲染进程/插件日志转发到主进程写文件 |
 
-**新增 IPC 通道四步骤（含 bridge 同步）：**
+**新增 IPC 通道三步骤：**
 1. `src/main/main.ts` — `ipcMain.handle('channel', handler)`
 2. `src/main/preload.ts` — `contextBridge.exposeInMainWorld` 中添加方法（返回 `Promise`）
 3. `plugins/shared/bridge/src/types.ts` — `ElectronAPI` 接口添加方法签名
-4. `plugins/shared/bridge/src/index.ts` — `electronAPI` 对象添加对应方法（调用 `callBridge`）
 
-> `src/shell/types/global.d.ts` 无需修改，它直接 re-export bridge 的类型。
+> `src/shell/types/global.d.ts` 和 `plugins/shared/bridge/src/index.ts` 均无需修改：前者直接 re-export bridge 类型，后者通过 Proxy 自动透传新方法。
 
 详细说明见 [`docs/plugin-bridge.md`](docs/plugin-bridge.md)。
 
@@ -296,7 +297,7 @@ const result = await electronAPI.showOpenDialog({ properties: ['openFile'] });
 | 路径 | 类型 | 内容 |
 |---|---|---|
 | `README.md` | 概述 | 项目简介、快速上手 |
-| `docs/plugin-bridge.md` | 技术 | `@toolbox/bridge` 插件通信桥重构说明 |
+| `docs/plugin-bridge.md` | 技术 | `@toolbox/bridge` 与 webview 插件 API 访问说明 |
 
 > 新增文档后请在此表登记。
 
@@ -347,7 +348,7 @@ const result = await electronAPI.showOpenDialog({ properties: ['openFile'] });
 | 文档 | 何时需要更新 |
 |---|---|
 | `AGENTS.md`（本文件） | 项目结构、文档索引、IPC 列表、开发规范发生变化 |
-| `docs/plugin-bridge.md` | bridge 包接口、postMessage 协议、接入方式变化 |
+| `docs/plugin-bridge.md` | webview 插件 API 访问层接口、接入方式变化 |
 
 ---
 
@@ -363,10 +364,10 @@ const result = await electronAPI.showOpenDialog({ properties: ['openFile'] });
 ## 10. 重要提醒
 
 - ⚠️ `pnpm-workspace.yaml` 中 `allowBuilds.electron: true` — 必须保持，否则 Electron 无法安装
-- ⚠️ 插件 `vite.config.ts` 必须设置 `base: './'` — 否则 iframe 加载时资源路径错误
+- ⚠️ 插件 `vite.config.ts` 必须设置 `base: './'` — 否则 webview 加载时资源路径错误
 - ⚠️ 新增插件后必须重新运行 `pnpm build:registry` — 否则注册表不会包含新插件
 - ⚠️ Shell 的 `dist/shell/index.html` 由 Vite 构建输出，`main.ts` 中的 `"main"` 字段指向 `dist/main/main.js`
-- ⚠️ **插件禁止直接使用 `window.electronAPI`**（插件 iframe 内该值为 `undefined`），必须通过 `@toolbox/bridge` 的 `electronAPI` 对象访问系统能力
+- ⚠️ **插件可直接使用 `window.electronAPI`**，webview 内 preload 已注入；也可通过 `@toolbox/bridge` 的 `electronAPI` 对象访问（推荐，有类型安全）
 - ⚠️ **`ElectronAPI` 接口的唯一来源是 `plugins/shared/bridge/src/types.ts`** — 禁止在其他位置重复定义，`src/shell/types/global.d.ts` 只做 re-export
-- ⚠️ **新增 IPC 方法后必须同步更新 bridge 包**（`types.ts` + `index.ts`），否则插件侧无法使用新方法
+- ⚠️ **新增 IPC 方法后只需更新 `types.ts`**，`index.ts` 的 Proxy 会自动透传，无需手动添加
 - ⚠️ **preload 中所有 `ElectronAPI` 方法必须返回 `Promise`** — 包括同步实现也需包为 `Promise.resolve(...)`，以保证签名一致性

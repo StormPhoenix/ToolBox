@@ -86,6 +86,9 @@ export interface ElectronAPI {
   /** 获取应用及运行环境信息 */
   getAppInfo(): Promise<AppInfo>;
 
+  /** 获取插件 webview 所需的 preload 脚本绝对路径（仅 Shell 侧使用） */
+  getPreloadPath(): Promise<string>;
+
   /** 弹出文件打开对话框 */
   showOpenDialog(options?: OpenDialogOptions): Promise<OpenDialogReturnValue>;
 

@@ -58,7 +58,7 @@ function createMainWindow(): void {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      webviewTag: false,
+      webviewTag: true,
     },
     titleBarStyle: 'default',
     show: false,
@@ -92,6 +92,11 @@ function createMainWindow(): void {
 }
 
 // ─── IPC Handlers ───────────────────────────────────────────
+
+// 插件 webview 所需的 preload 绝对路径（webview.preload 只接受 file:// 路径）
+ipcMain.handle('get-preload-path', () =>
+  path.join(__dirname, 'preload.js')
+);
 
 // 应用信息
 ipcMain.handle('get-app-info', () => ({

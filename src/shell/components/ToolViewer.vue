@@ -13,15 +13,15 @@
       <div class="toolbar-spacer"></div>
     </div>
 
-    <!-- iframe 容器 -->
+    <!-- webview 容器 -->
     <div class="iframe-wrapper">
-      <iframe
-        ref="frameRef"
+      <webview
+        ref="webviewRef"
         class="plugin-frame"
         :src="pluginUrl"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
-        allowtransparency="true"
-        @load="onLoad"
+        :preload="preloadUrl"
+        @did-finish-load="onLoad"
+        @did-fail-load="onLoadError"
       />
       <!-- 加载遮罩 -->
       <div class="frame-loading" v-if="loading">
@@ -32,72 +32,35 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import type { PluginManifest } from '../types';
+import type { ElectronAPI } from '../types/global.d.ts';
 
 const props = defineProps<{ plugin: PluginManifest }>();
 defineEmits<{ back: [] }>();
 
-const frameRef = ref<HTMLIFrameElement | null>(null);
 const loading = ref(true);
+const preloadUrl = ref('');
 
 const pluginUrl = computed(() =>
   `../../plugins/builtin/${props.plugin.id}/dist/${props.plugin.entry}`
 );
 
-function onLoad() {
+function onLoad(): void {
   loading.value = false;
 }
 
-// ── Shell → 插件 electronAPI 代理 ──────────────────────────
-// 插件 iframe 无法直接访问 preload 注入的 electronAPI，
-// 通过 postMessage 桥接：插件发请求 → Shell 调用 electronAPI → 把结果发回插件
-//
-// 特殊情况：getPathForFile 接收 File 对象（不可序列化），
-// 插件需通过 MessageChannel port 的 transfer 机制传递 File。
-
-async function handlePluginMessage(event: MessageEvent) {
-  const frame = frameRef.value;
-  if (!frame || event.source !== frame.contentWindow) return;
-
-  const { __toolboxBridge, id, method, args, file } = event.data ?? {};
-  if (!__toolboxBridge || !id || !method) return;
-
-  const api = (window as any).electronAPI;
-
-  try {
-    let result: unknown;
-
-    if (method === 'getPathForFile') {
-      // File 对象通过 postMessage data.file 传入。
-      // 注意：跨 iframe 的 instanceof File 会失败（不同 realm 的构造函数），
-      // 改用 duck typing 检查 name/size/arrayBuffer 字段。
-      if (!file || typeof file.name !== 'string' || typeof file.size !== 'number') {
-        throw new Error('getPathForFile: no File object received');
-      }
-      // preload 侧现已包为 Promise，必须 await
-      result = await api.getPathForFile(file);
-    } else {
-      if (!api || typeof api[method] !== 'function') {
-        throw new Error(`electronAPI.${method} not found`);
-      }
-      result = await api[method](...(args ?? []));
-    }
-
-    frame.contentWindow?.postMessage(
-      { __toolboxBridge: true, id, result },
-      '*'
-    );
-  } catch (e: any) {
-    frame.contentWindow?.postMessage(
-      { __toolboxBridge: true, id, error: e?.message ?? String(e) },
-      '*'
-    );
-  }
+function onLoadError(): void {
+  loading.value = false;
 }
 
-onMounted(() => window.addEventListener('message', handlePluginMessage));
-onUnmounted(() => window.removeEventListener('message', handlePluginMessage));
+// 从主进程获取 preload 绝对路径，转换为 file:// URL 供 webview 使用
+onMounted(async () => {
+  const api = (globalThis as unknown as { electronAPI: ElectronAPI }).electronAPI;
+  const preloadPath: string = await api.getPreloadPath();
+  // Windows 路径需要转换：C:\foo\bar → file:///C:/foo/bar
+  preloadUrl.value = `file:///${preloadPath.replace(/\\/g, '/')}`;
+});
 </script>
 
 <style scoped>
@@ -148,19 +111,22 @@ onUnmounted(() => window.removeEventListener('message', handlePluginMessage));
 
 .toolbar-spacer { flex: 1; }
 
-/* iframe */
+/* webview 容器（类名保持 iframe-wrapper / plugin-frame 以兼容外部引用） */
 .iframe-wrapper {
   flex: 1;
   position: relative;
   overflow: hidden;
+  /* webview 是自定义元素，需要显式撑满父容器 */
+  display: flex;
+  flex-direction: column;
 }
 
 .plugin-frame {
+  flex: 1;
   width: 100%;
-  height: 100%;
   border: none;
   background: var(--bg-content);
-  display: block;
+  display: flex;
 }
 
 /* 加载遮罩 */

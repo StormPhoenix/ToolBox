@@ -5,6 +5,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppInfo: () =>
     ipcRenderer.invoke('get-app-info'),
 
+  // 插件 webview 所需的 preload 绝对路径
+  getPreloadPath: () =>
+    ipcRenderer.invoke('get-preload-path'),
+
   // 文件对话框
   showOpenDialog: (options?: Electron.OpenDialogOptions) =>
     ipcRenderer.invoke('dialog:showOpenDialog', options),

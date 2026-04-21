@@ -2,7 +2,7 @@
   "name": "@toolbox/bridge",
   "version": "1.0.0",
   "private": true,
-  "description": "Plugin-to-Shell postMessage bridge — exposes electronAPI for plugin iframes",
+  "description": "Exposes electronAPI for plugins running in Electron webview — preload injected directly, no postMessage bridge needed",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "devDependencies": {

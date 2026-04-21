@@ -2,7 +2,7 @@
  * ToolBox 统一日志工具 — 渲染进程版（Shell & 插件通用）
  *
  * - Shell 侧：通过 window.electronAPI.log() IPC 转发到主进程写文件
- * - 插件侧：通过 @toolbox/bridge 的 electronAPI.log() → postMessage → Shell → IPC
+ * - 插件侧：webview 内 preload 已注入，同样直接调用 window.electronAPI.log()
  *
  * 用法（插件）：
  *   import { createLogger } from '@toolbox/bridge'
@@ -11,16 +11,7 @@
  *   log.debug('调试信息')   // 仅开发模式输出，生产模式完全静默
  */
 
-// 直接从桥接核心引用 callBridge，避免与 index.ts 产生循环依赖
 import type { ElectronAPI } from './types'
-
-/** 懒引用 electronAPI，运行时由 index.ts 初始化后注入 */
-let _electronAPI: ElectronAPI | null = null
-
-/** 由 index.ts 在初始化时注入，避免循环 import */
-export function _setElectronAPI(api: ElectronAPI): void {
-  _electronAPI = api
-}
 
 // ── Logger 接口（与主进程版保持一致） ─────────────────────────────────────
 
@@ -51,6 +42,11 @@ function formatArgs(args: unknown[]): string {
     .join(' ')
 }
 
+/** 获取运行时注入的 electronAPI（延迟求值，避免模块初始化时 window 尚未就绪） */
+function getAPI(): ElectronAPI | undefined {
+  return (window as Window & { electronAPI?: ElectronAPI }).electronAPI
+}
+
 /**
  * 创建带模块标签的日志实例
  *
@@ -63,15 +59,15 @@ export function createLogger(tag: string): Logger {
   return {
     info: (...args: unknown[]) => {
       console.log(prefix, ...args)
-      _electronAPI?.log('info', tag, formatArgs(args)).catch(() => { /* 静默 */ })
+      getAPI()?.log('info', tag, formatArgs(args)).catch(() => { /* 静默 */ })
     },
     warn: (...args: unknown[]) => {
       console.warn(prefix, ...args)
-      _electronAPI?.log('warn', tag, formatArgs(args)).catch(() => { /* 静默 */ })
+      getAPI()?.log('warn', tag, formatArgs(args)).catch(() => { /* 静默 */ })
     },
     error: (...args: unknown[]) => {
       console.error(prefix, ...args)
-      _electronAPI?.log('error', tag, formatArgs(args)).catch(() => { /* 静默 */ })
+      getAPI()?.log('error', tag, formatArgs(args)).catch(() => { /* 静默 */ })
     },
     debug: (...args: unknown[]) => {
       if (!isDev) return
