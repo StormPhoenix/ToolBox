@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@toolbox/bridge':
+        specifier: workspace:*
+        version: link:plugins/shared/bridge
       '@types/node':
         specifier: ^20.11.0
         version: 20.19.39
@@ -35,6 +38,9 @@ importers:
 
   plugins/builtin/pdf-editor:
     dependencies:
+      '@toolbox/bridge':
+        specifier: workspace:*
+        version: link:../../shared/bridge
       pdf-lib:
         specifier: ^1.17.1
         version: 1.17.1
@@ -53,6 +59,10 @@ importers:
         version: 3.5.32(typescript@5.9.3)
 
   plugins/builtin/welcome:
+    dependencies:
+      '@toolbox/bridge':
+        specifier: workspace:*
+        version: link:../../shared/bridge
     devDependencies:
       '@vitejs/plugin-vue':
         specifier: ^5.2.1
@@ -63,6 +73,15 @@ importers:
       vue:
         specifier: ^3.5.13
         version: 3.5.32(typescript@5.9.3)
+
+  plugins/shared/bridge:
+    devDependencies:
+      electron:
+        specifier: ^33.0.0
+        version: 33.4.11
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
 
 packages:
 

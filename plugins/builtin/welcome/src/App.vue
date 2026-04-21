@@ -58,14 +58,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-
-interface AppInfo {
-  name: string;
-  version: string;
-  electronVersion: string;
-  nodeVersion: string;
-  platform: string;
-}
+import { electronAPI } from '@toolbox/bridge';
+import type { AppInfo } from '@toolbox/bridge';
 
 const appInfo = ref<AppInfo | null>(null);
 
@@ -91,11 +85,7 @@ const guideSteps = [
 
 onMounted(async () => {
   try {
-    // @ts-ignore — electronAPI 由 preload 注入
-    if (window.electronAPI?.getAppInfo) {
-      // @ts-ignore
-      appInfo.value = await window.electronAPI.getAppInfo();
-    }
+    appInfo.value = await electronAPI.getAppInfo();
   } catch {
     // 非 Electron 环境忽略
   }

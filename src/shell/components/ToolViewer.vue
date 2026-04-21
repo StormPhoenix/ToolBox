@@ -69,11 +69,14 @@ async function handlePluginMessage(event: MessageEvent) {
     let result: unknown;
 
     if (method === 'getPathForFile') {
-      // File 对象通过 transfer 传入，在 event.data.file 中
-      if (!file || !(file instanceof File)) {
+      // File 对象通过 postMessage data.file 传入。
+      // 注意：跨 iframe 的 instanceof File 会失败（不同 realm 的构造函数），
+      // 改用 duck typing 检查 name/size/arrayBuffer 字段。
+      if (!file || typeof file.name !== 'string' || typeof file.size !== 'number') {
         throw new Error('getPathForFile: no File object received');
       }
-      result = api.getPathForFile(file);
+      // preload 侧现已包为 Promise，必须 await
+      result = await api.getPathForFile(file);
     } else {
       if (!api || typeof api[method] !== 'function') {
         throw new Error(`electronAPI.${method} not found`);
