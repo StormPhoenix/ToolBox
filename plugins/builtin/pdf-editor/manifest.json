@@ -1,0 +1,10 @@
+{
+  "id": "pdf-editor",
+  "name": "PDF 编辑",
+  "description": "导入、浏览 PDF 文件，支持移除指定页面并导出",
+  "category": "file",
+  "icon": "📄",
+  "entry": "index.html",
+  "version": "1.0.0",
+  "builtin": true
+}

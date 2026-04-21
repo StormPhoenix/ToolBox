@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // 应用信息
@@ -25,4 +25,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 系统
   openInExplorer: (targetPath: string) =>
     ipcRenderer.invoke('shell:openInExplorer', targetPath),
+
+  // 获取拖拽/选择文件的系统路径（webUtils，仅 preload 可调用）
+  getPathForFile: (file: File) =>
+    webUtils.getPathForFile(file),
 });

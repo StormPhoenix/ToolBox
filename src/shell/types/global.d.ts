@@ -18,6 +18,8 @@ interface ElectronAPI {
   readDir:   (dirPath: string) => Promise<{ name: string; isDir: boolean; path: string }[]>;
   // 系统
   openInExplorer: (targetPath: string) => Promise<void>;
+  // 获取文件系统路径（仅 preload 层可调用 webUtils）
+  getPathForFile: (file: File) => string;
 }
 
 declare global {

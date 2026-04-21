@@ -100,12 +100,12 @@ ipcMain.handle('dialog:showSaveDialog', (_e, options: Electron.SaveDialogOptions
 );
 
 // 文件系统
-ipcMain.handle('fs:readFile', async (_e, filePath: string, encoding: BufferEncoding = 'utf-8') => {
-  return fs.readFile(filePath, { encoding });
+ipcMain.handle('fs:readFile', async (_e, filePath: string, encoding: BufferEncoding | 'base64' = 'utf-8') => {
+  return fs.readFile(filePath, { encoding: encoding as BufferEncoding });
 });
 
-ipcMain.handle('fs:writeFile', async (_e, filePath: string, data: string, encoding: BufferEncoding = 'utf-8') => {
-  await fs.writeFile(filePath, data, { encoding });
+ipcMain.handle('fs:writeFile', async (_e, filePath: string, data: string, encoding: BufferEncoding | 'base64' = 'utf-8') => {
+  await fs.writeFile(filePath, data, { encoding: encoding as BufferEncoding });
 });
 
 ipcMain.handle('fs:readDir', async (_e, dirPath: string) => {

@@ -32,7 +32,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import type { PluginManifest } from '../types';
 
 const props = defineProps<{ plugin: PluginManifest }>();
@@ -41,16 +41,60 @@ defineEmits<{ back: [] }>();
 const frameRef = ref<HTMLIFrameElement | null>(null);
 const loading = ref(true);
 
-// 插件 dist 产物路径（相对于 dist/ 输出目录）
-const pluginUrl = computed(() => {
-  // 构建后的路径：dist/plugins/<id>/index.html
-  // Vite 输出时需与 electron loadFile 的工作目录对应
-  return `../../plugins/builtin/${props.plugin.id}/dist/${props.plugin.entry}`;
-});
+const pluginUrl = computed(() =>
+  `../../plugins/builtin/${props.plugin.id}/dist/${props.plugin.entry}`
+);
 
 function onLoad() {
   loading.value = false;
 }
+
+// ── Shell → 插件 electronAPI 代理 ──────────────────────────
+// 插件 iframe 无法直接访问 preload 注入的 electronAPI，
+// 通过 postMessage 桥接：插件发请求 → Shell 调用 electronAPI → 把结果发回插件
+//
+// 特殊情况：getPathForFile 接收 File 对象（不可序列化），
+// 插件需通过 MessageChannel port 的 transfer 机制传递 File。
+
+async function handlePluginMessage(event: MessageEvent) {
+  const frame = frameRef.value;
+  if (!frame || event.source !== frame.contentWindow) return;
+
+  const { __toolboxBridge, id, method, args, file } = event.data ?? {};
+  if (!__toolboxBridge || !id || !method) return;
+
+  const api = (window as any).electronAPI;
+
+  try {
+    let result: unknown;
+
+    if (method === 'getPathForFile') {
+      // File 对象通过 transfer 传入，在 event.data.file 中
+      if (!file || !(file instanceof File)) {
+        throw new Error('getPathForFile: no File object received');
+      }
+      result = api.getPathForFile(file);
+    } else {
+      if (!api || typeof api[method] !== 'function') {
+        throw new Error(`electronAPI.${method} not found`);
+      }
+      result = await api[method](...(args ?? []));
+    }
+
+    frame.contentWindow?.postMessage(
+      { __toolboxBridge: true, id, result },
+      '*'
+    );
+  } catch (e: any) {
+    frame.contentWindow?.postMessage(
+      { __toolboxBridge: true, id, error: e?.message ?? String(e) },
+      '*'
+    );
+  }
+}
+
+onMounted(() => window.addEventListener('message', handlePluginMessage));
+onUnmounted(() => window.removeEventListener('message', handlePluginMessage));
 </script>
 
 <style scoped>
