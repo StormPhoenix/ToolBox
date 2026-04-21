@@ -1,0 +1,10 @@
+{
+  "id": "welcome",
+  "name": "欢迎",
+  "description": "欢迎使用 ToolBox，快速了解工具箱的功能",
+  "category": "all",
+  "icon": "👋",
+  "entry": "index.html",
+  "version": "1.0.0",
+  "builtin": true
+}

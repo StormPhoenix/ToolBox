@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+  <title>ToolBox - 启动中</title>
+  <link rel="stylesheet" href="splash.css">
+</head>
+<body>
+  <div class="splash-container">
+    <!-- 背景光效 -->
+    <div class="bg-glow glow-1"></div>
+    <div class="bg-glow glow-2"></div>
+
+    <!-- Logo 区域 -->
+    <div class="logo-area">
+      <div class="logo-icon">
+        <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="72" height="72" rx="18" fill="url(#logo-gradient)"/>
+          <path d="M22 30L30 22L34 26L26 34L22 30Z" fill="white" opacity="0.9"/>
+          <path d="M38 46L46 38L50 42L42 50L38 46Z" fill="white" opacity="0.9"/>
+          <path d="M26 34L38 46" stroke="white" stroke-width="3" stroke-linecap="round" opacity="0.7"/>
+          <path d="M34 26L46 38" stroke="white" stroke-width="3" stroke-linecap="round" opacity="0.7"/>
+          <circle cx="36" cy="36" r="4" fill="white" opacity="0.8"/>
+          <defs>
+            <linearGradient id="logo-gradient" x1="0" y1="0" x2="72" y2="72">
+              <stop stop-color="#6c5ce7"/>
+              <stop offset="1" stop-color="#a29bfe"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <h1 class="app-name">ToolBox</h1>
+      <p class="app-tagline">智能工具箱，触手可及</p>
+    </div>
+
+    <!-- 加载动画 -->
+    <div class="loader-area">
+      <div class="progress-track">
+        <div class="progress-bar"></div>
+      </div>
+      <p class="status-text" id="statusText">正在初始化...</p>
+    </div>
+
+    <!-- 版本信息 -->
+    <div class="version-info">
+      <span>v1.0.0</span>
+    </div>
+  </div>
+
+  <script>
+    // 动态更新状态文本
+    const messages = [
+      '正在初始化...',
+      '加载核心模块...',
+      '准备用户界面...',
+      '即将完成...'
+    ];
+    let index = 0;
+    const statusEl = document.getElementById('statusText');
+
+    setInterval(() => {
+      if (index < messages.length - 1) {
+        index++;
+        if (statusEl) {
+          statusEl.style.opacity = '0';
+          setTimeout(() => {
+            statusEl.textContent = messages[index];
+            statusEl.style.opacity = '1';
+          }, 200);
+        }
+      }
+    }, 800);
+  </script>
+</body>
+</html>

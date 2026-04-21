@@ -1,0 +1,56 @@
+{
+  "name": "toolbox",
+  "version": "1.0.0",
+  "description": "A desktop application built with Electron + TypeScript",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "concurrently \"pnpm run dev:main\" \"pnpm run dev:shell\"",
+    "dev:main": "tsc -p tsconfig.main.json --watch",
+    "dev:shell": "vite --config vite.shell.config.ts",
+    "build": "pnpm run build:main && pnpm run build:shell && pnpm run build:plugins && pnpm run build:registry",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:shell": "vite build --config vite.shell.config.ts",
+    "build:plugins": "pnpm --filter \"./plugins/**\" run build",
+    "build:registry": "node scripts/build-registry.mjs",
+    "start": "pnpm run build && electron .",
+    "pack": "pnpm run build && electron-builder --dir",
+    "dist": "pnpm run build && electron-builder"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "concurrently": "^9.1.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.3.5",
+    "vue": "^3.5.13"
+  },
+  "build": {
+    "appId": "com.toolbox.app",
+    "productName": "ToolBox",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "plugins/**/dist/**/*",
+      "src/renderer/splash.html",
+      "src/renderer/splash.css"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}

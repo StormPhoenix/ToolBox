@@ -1,0 +1,71 @@
+# ─── 依赖 ────────────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+
+# ─── 构建产物 ─────────────────────────────────────────────────
+dist/
+release/
+
+# 插件构建产物（保留 manifest.json / package.json / src/）
+plugins/**/dist/
+
+# ─── 开发工具 ─────────────────────────────────────────────────
+# Vite
+.vite/
+
+# TypeScript
+*.tsbuildinfo
+
+# ─── 日志 ─────────────────────────────────────────────────────
+*.log
+*.log.*
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── 系统文件 ─────────────────────────────────────────────────
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# ─── 编辑器 ──────────────────────────────────────────────────
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# VSCode（保留 .vscode/extensions.json 和 settings.json 供团队共享）
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# ─── Electron ─────────────────────────────────────────────────
+# electron-builder 缓存
+.electron/
+app-update.yml
+dev-app-update.yml
+
+# ─── 环境变量 ─────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ─── 测试覆盖率 ───────────────────────────────────────────────
+coverage/
+.nyc_output/

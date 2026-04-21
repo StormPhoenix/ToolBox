@@ -1,0 +1,93 @@
+# ─── 默认行为 ─────────────────────────────────────────────────
+# 所有文件默认自动检测行尾，提交时不做转换
+* text=auto
+
+# ─── 明确指定文本文件（LF）──────────────────────────────────
+# 源代码
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.vue       text eol=lf
+*.js        text eol=lf
+*.mjs       text eol=lf
+*.cjs       text eol=lf
+
+# 样式
+*.css       text eol=lf
+*.scss      text eol=lf
+*.less      text eol=lf
+
+# 标记语言 / 模板
+*.html      text eol=lf
+*.xml       text eol=lf
+*.svg       text eol=lf
+
+# 配置文件
+*.json      text eol=lf
+*.jsonc     text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.toml      text eol=lf
+*.ini       text eol=lf
+*.env       text eol=lf
+
+# Shell 脚本（强制 LF，避免 Windows 下 CRLF 导致解析失败）
+*.sh        text eol=lf
+*.bash      text eol=lf
+
+# 文档
+*.md        text eol=lf
+*.txt       text eol=lf
+*.rst       text eol=lf
+
+# Electron Builder 配置
+.npmrc      text eol=lf
+.nvmrc      text eol=lf
+
+# ─── 二进制文件（禁止 diff / merge / 行尾转换）──────────────
+# 图片
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.bmp       binary
+*.ico       binary
+*.webp      binary
+*.avif      binary
+*.tiff      binary
+
+# 字体
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.otf       binary
+*.eot       binary
+
+# 音视频
+*.mp3       binary
+*.mp4       binary
+*.wav       binary
+*.ogg       binary
+*.webm      binary
+
+# 压缩 / 归档
+*.zip       binary
+*.tar       binary
+*.gz        binary
+*.7z        binary
+*.dmg       binary
+*.exe       binary
+*.pkg       binary
+*.deb       binary
+*.rpm       binary
+*.AppImage  binary
+
+# Node.js 原生模块
+*.node      binary
+
+# ─── Linguist（GitHub 语言统计）────────────────────────────
+# 构建产物不参与语言统计
+dist/**             linguist-generated=true
+plugins/**/dist/**  linguist-generated=true
+
+# 锁文件折叠显示（不影响 diff，只影响 GitHub PR 页面）
+pnpm-lock.yaml  linguist-generated=true
