@@ -225,7 +225,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue';
+import { ref, reactive, watch, onBeforeUnmount } from 'vue';
 import Sortable from 'sortablejs';
 import {
   fileItems,
@@ -280,27 +280,27 @@ function isConflict(index: number): boolean {
 const listEl = ref<HTMLElement | null>(null);
 let sortable: Sortable | null = null;
 
-onMounted(() => {
-  if (!listEl.value) return;
-  sortable = Sortable.create(listEl.value, {
-    animation: 150,
-    handle: '.drag-handle',
-    ghostClass: 'card-ghost',
-    chosenClass: 'card-chosen',
-    onEnd(evt) {
-      const { oldIndex, newIndex } = evt;
-      if (oldIndex === undefined || newIndex === undefined || oldIndex === newIndex) return;
-      const arr = fileItems.value.slice();
-      const [moved] = arr.splice(oldIndex, 1);
-      arr.splice(newIndex, 0, moved);
-      fileItems.value = arr;
-    },
-  });
-});
-
-onBeforeUnmount(() => {
-  sortable?.destroy();
-  sortable = null;
+// listEl 在 fileItems 非空后才会渲染，用 watch 代替 onMounted
+watch(listEl, (el) => {
+  if (el && !sortable) {
+    sortable = Sortable.create(el, {
+      animation: 150,
+      handle: '.drag-handle',
+      ghostClass: 'card-ghost',
+      chosenClass: 'card-chosen',
+      onEnd(evt) {
+        const { oldIndex, newIndex } = evt;
+        if (oldIndex === undefined || newIndex === undefined || oldIndex === newIndex) return;
+        const arr = fileItems.value.slice();
+        const [moved] = arr.splice(oldIndex, 1);
+        arr.splice(newIndex, 0, moved);
+        fileItems.value = arr;
+      },
+    });
+  } else if (!el && sortable) {
+    sortable.destroy();
+    sortable = null;
+  }
 });
 
 // ── 拖拽导入 ──────────────────────────────────────────────────
