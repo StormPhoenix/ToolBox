@@ -140,14 +140,28 @@ export interface LLMChatResult {
   };
 }
 
+/**
+ * 单个 Provider 的脱敏公开配置。
+ *
+ * - `apiKeyMasked`：掩码后的 apiKey（如 `****1a2b`），仅用于展示。
+ * - `hasApiKey`：该 provider 是否已持久化一个非空 apiKey。前端据此决定
+ *   "测试连接"按钮在输入框留空时是否仍可点击（留空表示沿用已存 key）。
+ */
+export interface LLMProviderPublicConfig {
+  apiKeyMasked: string;
+  hasApiKey: boolean;
+  baseURL?: string;
+  model: string;
+}
+
 /** getLLMConfig 返回的脱敏配置（apiKey 替换为掩码） */
 export interface LLMConfigPublic {
   provider: LLMProviderType;
-  claude?: { apiKeyMasked: string; baseURL?: string; model: string };
-  openai?: { apiKeyMasked: string; baseURL?: string; model: string };
-  gemini?: { apiKeyMasked: string; baseURL?: string; model: string };
+  claude?: LLMProviderPublicConfig;
+  openai?: LLMProviderPublicConfig;
+  gemini?: LLMProviderPublicConfig;
   maxTokens?: number;
-  /** 当前 provider 是否已配置可用 */
+  /** 当前 provider 是否已配置可用（apiKey + model 均非空） */
   available: boolean;
 }
 

@@ -78,7 +78,7 @@ const visionResult = await electronAPI.llmChat([{
 }
 ```
 
-`getLLMConfig()` 返回脱敏版本，`apiKey` 替换为 `****xxxx`（末4位可见）。
+`getLLMConfig()` 返回脱敏版本：`apiKey` 替换为 `****xxxx`（末4位可见），并为每个 provider 附带 `hasApiKey: boolean` 标记是否已持久化 key。前端 Settings 页据此判断"即使输入框留空也可点击测试连接"，实现免重输体验。
 
 `setLLMConfig()` 只更新传入的字段；`apiKey` 传空字符串或不传均保留原值。
 

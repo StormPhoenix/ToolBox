@@ -142,9 +142,9 @@ export interface LLMConfig {
 /** getLLMConfig 返回的脱敏版本（apiKey 替换为掩码） */
 export interface LLMConfigPublic {
   provider: ProviderType;
-  claude?: { apiKeyMasked: string; baseURL?: string; model: string };
-  openai?: { apiKeyMasked: string; baseURL?: string; model: string };
-  gemini?: { apiKeyMasked: string; baseURL?: string; model: string };
+  claude?: { apiKeyMasked: string; hasApiKey: boolean; baseURL?: string; model: string };
+  openai?: { apiKeyMasked: string; hasApiKey: boolean; baseURL?: string; model: string };
+  gemini?: { apiKeyMasked: string; hasApiKey: boolean; baseURL?: string; model: string };
   maxTokens?: number;
   /** 当前 provider 是否已配置可用 */
   available: boolean;

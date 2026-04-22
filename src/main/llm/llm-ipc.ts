@@ -61,6 +61,7 @@ function toPublicConfig(config: LLMConfig): LLMConfigPublic {
   if (config.claude) {
     result.claude = {
       apiKeyMasked: maskApiKey(config.claude.apiKey),
+      hasApiKey: !!config.claude.apiKey,
       baseURL: config.claude.baseURL,
       model: config.claude.model,
     };
@@ -68,6 +69,7 @@ function toPublicConfig(config: LLMConfig): LLMConfigPublic {
   if (config.openai) {
     result.openai = {
       apiKeyMasked: maskApiKey(config.openai.apiKey),
+      hasApiKey: !!config.openai.apiKey,
       baseURL: config.openai.baseURL,
       model: config.openai.model,
     };
@@ -75,6 +77,7 @@ function toPublicConfig(config: LLMConfig): LLMConfigPublic {
   if (config.gemini) {
     result.gemini = {
       apiKeyMasked: maskApiKey(config.gemini.apiKey),
+      hasApiKey: !!config.gemini.apiKey,
       baseURL: config.gemini.baseURL,
       model: config.gemini.model,
     };
@@ -234,6 +237,8 @@ export function registerLLMHandlers(): void {
         ]);
         const hasText = response.content.some((b) => b.type === 'text');
         if (!hasText) throw new Error('返回内容为空');
+        // 打印返回信息
+        log.info(`测试连接返回: ${response.content.filter((b) => b.type === 'text').map((b) => b.text).join('')}`);
         log.info('连接测试成功');
         return { ok: true };
       } catch (err) {

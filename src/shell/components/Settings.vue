@@ -34,7 +34,12 @@
         <!-- 当前 Provider 配置 -->
         <template v-if="currentProviderConfig">
           <div class="field-group">
-            <label class="field-label">API Key</label>
+            <label class="field-label">
+              API Key
+              <span v-if="hasSavedKey" class="field-hint field-hint--ok">
+                ✓ 已保存，留空沿用原 key
+              </span>
+            </label>
             <div class="input-row">
               <input
                 class="field-input"
@@ -188,17 +193,34 @@ const saveSuccess = ref(false);
 const testing = ref(false);
 const testResult = ref<{ ok: boolean; error?: string } | null>(null);
 
+/**
+ * 各 provider 是否已有持久化的 apiKey。
+ * 由 `getLLMConfig` 返回的 `hasApiKey` 字段填充；`handleSave` 成功后也会同步更新。
+ * 前端据此判断：用户即使留空输入框，也可点击"测试连接"（后端沿用已存 key）。
+ */
+const savedKeyMap = reactive<Record<LLMProviderType, boolean>>({
+  claude: false,
+  openai: false,
+  gemini: false,
+});
+
 // ── 计算属性 ──────────────────────────────────────────────
 
 const currentProviderConfig = computed<ProviderFormItem>(() => form[form.provider]);
 
-const keyPlaceholder = computed(() => PLACEHOLDERS[form.provider].key);
+const hasSavedKey = computed(() => savedKeyMap[form.provider]);
+
+const keyPlaceholder = computed(() =>
+  hasSavedKey.value ? '（留空沿用已保存的 key）' : PLACEHOLDERS[form.provider].key
+);
 const modelPlaceholder = computed(() => PLACEHOLDERS[form.provider].model);
 const baseURLPlaceholder = computed(() => PLACEHOLDERS[form.provider].baseURL || '（使用默认地址）');
 
 const canTest = computed(() => {
   const cfg = form[form.provider];
-  return cfg.apiKey.trim() !== '' && cfg.model.trim() !== '';
+  // 有已保存的 key，或输入框里填了新 key
+  const hasKey = cfg.apiKey.trim() !== '' || savedKeyMap[form.provider];
+  return hasKey && cfg.model.trim() !== '';
 });
 
 // provider 切换时重置测试结果
@@ -214,18 +236,21 @@ onMounted(async () => {
     const config = await window.electronAPI.getLLMConfig();
     form.provider = config.provider;
     if (config.maxTokens) form.maxTokens = config.maxTokens;
-    // apiKey 已脱敏，只恢复 model 和 baseURL
+    // apiKey 已脱敏，只恢复 model 和 baseURL；hasApiKey 用于前端"免重输"判断
     if (config.claude) {
       form.claude.model = config.claude.model;
       form.claude.baseURL = config.claude.baseURL ?? '';
+      savedKeyMap.claude = config.claude.hasApiKey;
     }
     if (config.openai) {
       form.openai.model = config.openai.model;
       form.openai.baseURL = config.openai.baseURL ?? '';
+      savedKeyMap.openai = config.openai.hasApiKey;
     }
     if (config.gemini) {
       form.gemini.model = config.gemini.model;
       form.gemini.baseURL = config.gemini.baseURL ?? '';
+      savedKeyMap.gemini = config.gemini.hasApiKey;
     }
   } catch {
     // 无配置，使用默认值
@@ -252,6 +277,21 @@ async function handleSave(): Promise<void> {
       };
     }
     await window.electronAPI.setLLMConfig(input);
+
+    // 同步"已保存 key"状态：
+    // 1. 本次提交了新 key 的 provider，标记为已保存
+    // 2. 已保存过 key 的 provider 继续保留（后端会沿用原值）
+    for (const key of ['claude', 'openai', 'gemini'] as const) {
+      if (form[key].apiKey.trim() !== '') {
+        savedKeyMap[key] = true;
+      }
+    }
+    // 清空输入框中的真 key（避免用户来回切换看到明文/密文）
+    for (const key of ['claude', 'openai', 'gemini'] as const) {
+      form[key].apiKey = '';
+    }
+    showKey.value = false;
+
     saveSuccess.value = true;
     setTimeout(() => { saveSuccess.value = false; }, 3000);
   } finally {
@@ -262,14 +302,25 @@ async function handleSave(): Promise<void> {
 async function handleTest(): Promise<void> {
   testing.value = true;
   testResult.value = null;
-  // 先保存再测试，确保用最新配置
-  await handleSave();
   try {
+    // 仅当表单有未保存的修改时才先写一次配置；
+    // 否则直接使用后端已持久化的配置进行测试。
+    if (hasUnsavedChanges()) {
+      await handleSave();
+    }
     const result = await window.electronAPI.testLLMConnection();
     testResult.value = result;
   } finally {
     testing.value = false;
   }
+}
+
+/** 表单是否相对已保存配置有改动（任一 provider 填了新 apiKey 即算改动） */
+function hasUnsavedChanges(): boolean {
+  for (const key of ['claude', 'openai', 'gemini'] as const) {
+    if (form[key].apiKey.trim() !== '') return true;
+  }
+  return false;
 }
 </script>
 
@@ -356,6 +407,11 @@ async function handleTest(): Promise<void> {
 .field-hint {
   font-weight: 400;
   color: var(--text-dim);
+}
+
+.field-hint--ok {
+  color: var(--success, #00b894);
+  margin-left: 6px;
 }
 
 .field-input {
