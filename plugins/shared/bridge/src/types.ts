@@ -128,6 +128,9 @@ export interface ElectronAPI {
    */
   getPathForFile(file: File): Promise<string>;
 
+  /** 重命名文件（或移动到同目录下的新名） */
+  renameFile(oldPath: string, newPath: string): Promise<void>;
+
   /**
    * 将渲染进程（Shell / 插件）日志转发到主进程写文件。
    * debug 级别在调用方已过滤，不应传入此方法。

@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openInExplorer: (targetPath: string) =>
     ipcRenderer.invoke('shell:openInExplorer', targetPath),
 
+  renameFile: (oldPath: string, newPath: string) =>
+    ipcRenderer.invoke('fs:renameFile', oldPath, newPath),
+
   // 获取拖拽/选择文件的系统路径（webUtils，仅 preload 可调用）
   // 包为 Promise 以与 ElectronAPI 接口统一（bridge 侧也是 Promise<string>）
   getPathForFile: (file: File) =>

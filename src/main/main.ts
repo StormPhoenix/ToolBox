@@ -147,6 +147,10 @@ ipcMain.handle('shell:openInExplorer', (_e, targetPath: string) =>
   shell.openPath(targetPath)
 );
 
+ipcMain.handle('fs:renameFile', async (_e, oldPath: string, newPath: string) => {
+  await fs.rename(oldPath, newPath);
+});
+
 // 日志转发（渲染进程 / 插件 → 主进程写文件）
 ipcMain.handle(
   'logger:log',
