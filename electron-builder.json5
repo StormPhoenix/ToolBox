@@ -1,0 +1,91 @@
+{
+  /**
+   * electron-builder 打包配置
+   * 文档：https://www.electron.build/configuration/configuration
+   */
+  "appId": "com.toolbox.app",
+  "productName": "ToolBox",
+
+  "directories": {
+    "output": "release"
+  },
+
+  // 打包包含的文件
+  "files": [
+    "dist/**/*",
+    "plugins/**/dist/**/*",
+    "src/renderer/splash.html",
+    "src/renderer/splash.css"
+  ],
+
+  // ── Windows ──────────────────────────────────────────────────────────────
+  "win": {
+    "target": [
+      {
+        "target": "nsis",       // 生成带安装向导的 .exe 安装包
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "build/icon.ico"    // 可选：应用图标，放在 build/ 目录下
+  },
+
+  /**
+   * NSIS 安装器选项
+   * 关键：oneClick:false + allowToChangeInstallationDirectory:true
+   * 组合后安装向导会显示"选择安装目录"页面
+   */
+  "nsis": {
+    // 必须关闭一键安装，才能显示安装向导页面
+    "oneClick": false,
+
+    // 显示"选择安装路径"页面
+    "allowToChangeInstallationDirectory": true,
+
+    // false = 默认安装到当前用户目录（无需管理员权限）
+    // true  = 默认安装到 Program Files（需要管理员权限）
+    "perMachine": false,
+
+    // 允许用户在安装向导中选择是否为所有用户安装
+    "allowElevation": true,
+
+    // 在安装完成页显示"启动应用"复选框
+    "runAfterFinish": true,
+
+    // 创建桌面快捷方式
+    "createDesktopShortcut": true,
+
+    // 在开始菜单创建快捷方式
+    "createStartMenuShortcut": true,
+
+    // 开始菜单文件夹名称
+    "menuCategory": "ToolBox",
+
+    // 安装程序界面语言（简体中文）
+    "language": "2052"
+  },
+
+  // ── macOS ─────────────────────────────────────────────────────────────────
+  "mac": {
+    "target": [
+      {
+        "target": "dmg",
+        "arch": ["x64", "arm64"]
+      }
+    ],
+    "icon": "build/icon.icns"   // 可选：macOS 应用图标
+  },
+
+  "dmg": {
+    // DMG 窗口默认大小
+    "window": {
+      "width": 540,
+      "height": 380
+    }
+  },
+
+  // ── Linux ─────────────────────────────────────────────────────────────────
+  "linux": {
+    "target": ["AppImage"],
+    "icon": "build/icon.png"    // 可选：Linux 应用图标
+  }
+}
