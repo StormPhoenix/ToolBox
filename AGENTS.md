@@ -320,6 +320,7 @@ const result = await electronAPI.showOpenDialog({ properties: ['openFile'] });
 | `README.md` | 概述 | 项目简介、快速上手 |
 | `docs/plugin-bridge.md` | 技术 | `@toolbox/bridge` 与 webview 插件 API 访问说明 |
 | `docs/design/file-rename-plugin-design.md` | 需求/设计 | 批量重命名插件功能规格、UI 设计、IPC 扩展方案 |
+| `docs/design/image-resize-plugin-design.md` | 需求/设计 | 图像分辨率调整插件功能规格、Resize Provider 架构、IPC 扩展方案 |
 | `docs/tech/llm-framework.md` | 技术 | LLM 框架架构、Provider 配置、插件调用指南 |
 
 > 新增文档后请在此表登记。
