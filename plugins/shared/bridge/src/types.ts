@@ -70,6 +70,12 @@ export interface AppInfo {
   electronVersion: string;
   nodeVersion: string;
   platform: string;
+  /** 构建时的 git commit 短 hash，不可用时为 'unknown' */
+  gitHash: string;
+  /** 构建时的 git branch 名，不可用时为 'unknown' */
+  gitBranch: string;
+  /** 构建时间 ISO 8601 字符串 */
+  buildTime: string;
 }
 
 // ── 目录项 ────────────────────────────────────────────────────────────────

@@ -9,6 +9,11 @@ import {
   writeRendererLog,
 } from './logger';
 
+// 构建期由 vite.main.config.ts define 注入的全局常量
+declare const __GIT_HASH__: string;
+declare const __GIT_BRANCH__: string;
+declare const __BUILD_TIME__: string;
+
 // 尽早初始化管道保护（在任何 console 调用之前）
 initPipeGuard();
 
@@ -98,13 +103,16 @@ ipcMain.handle('get-preload-path', () =>
   path.join(__dirname, 'preload.js')
 );
 
-// 应用信息
+// 应用信息（含构建期注入的 git 信息）
 ipcMain.handle('get-app-info', () => ({
-  name: app.getName(),
-  version: app.getVersion(),
+  name:            app.getName(),
+  version:         app.getVersion(),
   electronVersion: process.versions.electron,
-  nodeVersion: process.versions.node,
-  platform: process.platform,
+  nodeVersion:     process.versions.node,
+  platform:        process.platform,
+  gitHash:         __GIT_HASH__,
+  gitBranch:       __GIT_BRANCH__,
+  buildTime:       __BUILD_TIME__,
 }));
 
 // 文件对话框

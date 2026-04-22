@@ -76,15 +76,16 @@ ToolBox/
 │           │   └── App.vue           # 插件主组件
 │           └── dist/                 # 构建产物（自动生成）
 ├── scripts/
-│   └── build-registry.mjs           # 扫描 plugins/ 生成 plugin-registry.json
+│   ├── build-registry.mjs           # 扫描 plugins/ 生成 plugin-registry.json
+│   └── get-git-info.mjs             # 获取 git hash/branch/buildTime，供 vite 配置使用
 ├── dist/                             # 所有构建产物（自动生成，勿手动修改）
 │   ├── main/                         # 主进程编译输出
 │   ├── shell/                        # Shell Vue 构建输出
 │   └── plugin-registry.json         # 插件注册表（由 build-registry 生成）
 ├── release/                          # electron-builder 打包输出
+├── vite.main.config.ts               # 主进程 + preload 的 Vite 构建配置（含构建信息注入）
 ├── vite.shell.config.ts              # Shell 的 Vite 配置
 ├── tsconfig.json                     # TypeScript 基础配置
-├── tsconfig.main.json                # 主进程 TS 配置
 ├── tsconfig.shell.json               # Shell TS 配置
 ├── package.json                      # 根项目配置
 ├── pnpm-workspace.yaml              # workspace：注册 plugins/**
@@ -99,12 +100,12 @@ ToolBox/
 
 ### 3.1 进程模型
 
-| 角色 | 目录 | 运行环境 | 模块系统 |
-|------|------|----------|----------|
-| **主进程** | `src/main/main.ts` | Node.js | CommonJS |
-| **预加载脚本** | `src/main/preload.ts` | 隔离沙箱 | CommonJS |
-| **Shell（主界面）** | `src/shell/` | Chromium + Vue 3 | ES Modules |
-| **插件** | `plugins/<scope>/<id>/` | webview 独立 Chromium 渲染进程 | ES Modules |
+| 角色 | 目录 | 运行环境 | 模块系统 | 构建工具 |
+|------|------|----------|----------|----------|
+| **主进程** | `src/main/main.ts` | Node.js | CommonJS | Vite (`vite.main.config.ts`) |
+| **预加载脚本** | `src/main/preload.ts` | 隔离沙箱 | CommonJS | Vite (`vite.main.config.ts`) |
+| **Shell（主界面）** | `src/shell/` | Chromium + Vue 3 | ES Modules | Vite (`vite.shell.config.ts`) |
+| **插件** | `plugins/<scope>/<id>/` | webview 独立 Chromium 渲染进程 | ES Modules | Vite（各插件独立配置） |
 
 ### 3.2 插件系统
 
@@ -161,7 +162,7 @@ plugins/
 
 | 方法 | IPC 通道 | 说明 |
 |------|----------|------|
-| `getAppInfo()` | `get-app-info` | 获取应用/环境信息 |
+| `getAppInfo()` | `get-app-info` | 获取应用/环境信息，含构建期注入的 `gitHash`、`gitBranch`、`buildTime` |
 | `getPreloadPath()` | `get-preload-path` | 获取 preload 脚本绝对路径（供 webview 使用） |
 | `showOpenDialog(options?)` | `dialog:showOpenDialog` | 打开文件选择对话框 |
 | `showSaveDialog(options?)` | `dialog:showSaveDialog` | 打开文件保存对话框 |
@@ -171,6 +172,7 @@ plugins/
 | `openInExplorer(path)` | `shell:openInExplorer` | 在资源管理器中打开 |
 | `getPathForFile(file)` | —（preload `webUtils`） | 获取 File 对象的系统路径 |
 | `log(level, tag, message)` | `logger:log` | 渲染进程/插件日志转发到主进程写文件 |
+| `getPluginStats()` | `get-plugin-stats` | 获取插件注册表统计（total / builtin / categories） |
 
 **新增 IPC 通道三步骤：**
 1. `src/main/main.ts` — `ipcMain.handle('channel', handler)`
@@ -191,13 +193,13 @@ plugins/
 | 命令 | 说明 |
 |------|------|
 | `pnpm install` | 安装所有依赖（含 workspace 插件） |
-| `pnpm build:main` | 编译主进程 TypeScript → `dist/main/` |
+| `pnpm build:main` | Vite 构建主进程 + preload → `dist/main/` |
 | `pnpm build:shell` | Vite 构建 Shell → `dist/shell/` |
 | `pnpm build:plugins` | 构建所有插件 → 各插件 `dist/` |
 | `pnpm build:registry` | 生成 `dist/plugin-registry.json` |
 | `pnpm build` | 全量构建（上述四步顺序执行） |
 | `pnpm start` | 全量构建 + 启动 Electron |
-| `pnpm dev:main` | 监听编译主进程 |
+| `pnpm dev:main` | Vite watch 模式构建主进程（热重编译） |
 | `pnpm dev:shell` | Vite dev server（Shell，端口 5173） |
 
 ### 5.2 开发模式
@@ -371,6 +373,8 @@ const result = await electronAPI.showOpenDialog({ properties: ['openFile'] });
 - ⚠️ 插件 `vite.config.ts` 必须设置 `base: './'` — 否则 webview 加载时资源路径错误
 - ⚠️ 新增插件后必须重新运行 `pnpm build:registry` — 否则注册表不会包含新插件
 - ⚠️ Shell 的 `dist/shell/index.html` 由 Vite 构建输出，`main.ts` 中的 `"main"` 字段指向 `dist/main/main.js`
+- ⚠️ **主进程和 preload 均由 `vite.main.config.ts` 构建**（双入口 CJS），`electron` 和所有 Node 内置模块已 external，不会被打包
+- ⚠️ **构建期信息（git hash/branch/buildTime）通过 `vite.main.config.ts` 的 `define` 注入**，在主进程代码中以 `__GIT_HASH__`、`__GIT_BRANCH__`、`__BUILD_TIME__` 全局常量形式使用，由 `get-app-info` IPC 返回
 - ⚠️ **插件可直接使用 `window.electronAPI`**，webview 内 preload 已注入；也可通过 `@toolbox/bridge` 的 `electronAPI` 对象访问（推荐，有类型安全）
 - ⚠️ **`ElectronAPI` 接口的唯一来源是 `plugins/shared/bridge/src/types.ts`** — 禁止在其他位置重复定义，`src/shell/types/global.d.ts` 只做 re-export
 - ⚠️ **新增 IPC 方法后只需更新 `types.ts`**，`index.ts` 的 Proxy 会自动透传，无需手动添加

@@ -5,10 +5,10 @@
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "concurrently \"pnpm run dev:main\" \"pnpm run dev:shell\"",
-    "dev:main": "tsc -p tsconfig.main.json --watch",
+    "dev:main": "vite build --config vite.main.config.ts --watch",
     "dev:shell": "vite --config vite.shell.config.ts",
     "build": "pnpm run build:main && pnpm run build:shell && pnpm run build:plugins && pnpm run build:registry",
-    "build:main": "tsc -p tsconfig.main.json",
+    "build:main": "vite build --config vite.main.config.ts",
     "build:shell": "vite build --config vite.shell.config.ts",
     "build:plugins": "pnpm --filter \"./plugins/**\" run build",
     "build:registry": "node scripts/build-registry.mjs",

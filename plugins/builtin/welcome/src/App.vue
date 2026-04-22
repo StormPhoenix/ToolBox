@@ -51,6 +51,14 @@
         <span>Node.js {{ appInfo.nodeVersion }}</span>
         <span class="divider">·</span>
         <span>{{ appInfo.platform }}</span>
+        <template v-if="appInfo.gitHash !== 'unknown'">
+          <span class="divider">·</span>
+          <span title="构建信息">{{ appInfo.gitBranch }}@{{ appInfo.gitHash }}</span>
+        </template>
+        <template v-if="appInfo.buildTime !== 'unknown'">
+          <span class="divider">·</span>
+          <span :title="appInfo.buildTime">{{ formatBuildTime(appInfo.buildTime) }}</span>
+        </template>
       </div>
     </div>
   </div>
@@ -95,6 +103,17 @@ onMounted(async () => {
     // 非 Electron 环境忽略
   }
 });
+
+function formatBuildTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('zh-CN', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
 </script>
 
 <style>
