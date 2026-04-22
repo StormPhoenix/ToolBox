@@ -29,14 +29,27 @@ ToolBox/
 │   │   ├── main.ts                   # 应用入口、窗口管理、所有 IPC handlers
 │   │   ├── preload.ts                # contextBridge 安全 API 暴露
 │   │   ├── logger.ts                 # 主进程日志工具（文件持久化、EPIPE 保护）
-│   │   └── llm/                      # LLM 框架（主进程侧）
-│   │       ├── types.ts              # 统一 LLM 类型（Provider 接口、配置类型等）
-│   │       ├── router.ts             # LLMRouter — Provider 路由与生命周期管理
-│   │       ├── llm-ipc.ts            # IPC handler 注册（registerLLMHandlers）
+│   │   ├── llm/                      # LLM 框架（主进程侧）
+│   │   │   ├── types.ts              # 统一 LLM 类型（Provider 接口、配置类型等）
+│   │   │   ├── router.ts             # LLMRouter — Provider 路由与生命周期管理
+│   │   │   ├── llm-ipc.ts            # IPC handler 注册（registerLLMHandlers）
+│   │   │   └── providers/
+│   │   │       ├── claude.ts         # ClaudeProvider（@anthropic-ai/sdk）
+│   │   │       ├── openai.ts         # OpenAIProvider（openai SDK，兼容第三方）
+│   │   │       └── gemini.ts         # GeminiProvider（@google/genai）
+│   │   └── image-resize/             # 图像分辨率调整框架（主进程侧，sharp + exifr）
+│   │       ├── types.ts              # ResizeProvider 接口、Options、Response 等
+│   │       ├── router.ts             # ResizeRouter — 算法路由 + 错误统一
+│   │       ├── image-ipc.ts          # IPC handler 注册（registerImageResizeHandlers）
+│   │       ├── temp-manager.ts       # 临时文件生命周期（session 隔离、24h 启动清理）
+│   │       ├── metadata.ts           # sharp + exifr 元数据解析 + 256px 略缩图
 │   │       └── providers/
-│   │           ├── claude.ts         # ClaudeProvider（@anthropic-ai/sdk）
-│   │           ├── openai.ts         # OpenAIProvider（openai SDK，兼容第三方）
-│   │           └── gemini.ts         # GeminiProvider（@google/genai）
+│   │           ├── sharp-base.ts     # 经典算法共用基类（sharp 管线）
+│   │           ├── nearest.ts        # 最近邻
+│   │           ├── bilinear.ts       # 双线性（cubic 近似）
+│   │           ├── bicubic.ts        # 双三次
+│   │           ├── lanczos.ts        # Lanczos3（默认）
+│   │           └── llm-upscale.ts    # 【TODO V2】LLM 超分 Provider 骨架
 │   ├── renderer/                     # 启动页（Splash Screen）
 │   │   ├── splash.html               # 启动页 HTML
 │   │   └── splash.css                # 启动页样式
@@ -75,6 +88,7 @@ ToolBox/
 │       ├── pdf-split/                # PDF 拆分插件
 │       ├── pdf-editor/               # PDF 编辑插件
 │       ├── file-rename/              # 批量重命名插件
+│       ├── image-resize/             # 图像分辨率调整插件
 │       └── welcome/                  # 欢迎页插件（示例）
 │           ├── manifest.json         # 插件元数据
 │           ├── package.json          # 独立 npm 包
@@ -188,6 +202,10 @@ plugins/
 | `getLLMConfig()` | `llm:get-config` | 获取当前 LLM 配置（脱敏，apiKey 掩码） |
 | `setLLMConfig(config)` | `llm:set-config` | 更新 LLM 配置（provider / apiKey / model / baseURL） |
 | `testLLMConnection()` | `llm:test-connection` | 测试当前配置连通性，返回 `{ ok, error? }` |
+| `listResizeProviders()` | `image-resize:list-providers` | 列出图像缩放算法 Provider（classical / ai 分组，含 available 状态） |
+| `parseImageMetadata(filePath)` | `image-resize:parse-metadata` | 解析图片基本信息 + EXIF（sharp + exifr），同时生成 256px 略缩图，分配 `sessionId` |
+| `resizeImage(inputPath, options, sessionId)` | `image-resize:process` | 按 `ResizeOptions` 处理图片，结果写入临时文件，返回 `ResizeResponse` |
+| `saveResizedImage(tempPath, targetPath)` | `image-resize:save-as` | 将处理后的临时文件另存为到用户指定路径 |
 
 **新增 IPC 通道三步骤：**
 1. `src/main/main.ts` — `ipcMain.handle('channel', handler)`

@@ -60,4 +60,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   testLLMConnection: () =>
     ipcRenderer.invoke('llm:test-connection'),
+
+  // ── Image Resize ─────────────────────────────────────────
+  listResizeProviders: () =>
+    ipcRenderer.invoke('image-resize:list-providers'),
+
+  parseImageMetadata: (filePath: string) =>
+    ipcRenderer.invoke('image-resize:parse-metadata', filePath),
+
+  resizeImage: (inputPath: string, options: unknown, sessionId: string) =>
+    ipcRenderer.invoke('image-resize:process', inputPath, options, sessionId),
+
+  saveResizedImage: (tempPath: string, targetPath: string) =>
+    ipcRenderer.invoke('image-resize:save-as', tempPath, targetPath),
 });

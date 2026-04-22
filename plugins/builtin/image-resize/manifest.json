@@ -1,0 +1,10 @@
+{
+  "id": "image-resize",
+  "name": "图像分辨率调整",
+  "description": "导入图片查看 EXIF，按最大长边等比缩放并另存为",
+  "category": "image",
+  "icon": "🖼️",
+  "entry": "index.html",
+  "version": "1.0.0",
+  "builtin": true
+}

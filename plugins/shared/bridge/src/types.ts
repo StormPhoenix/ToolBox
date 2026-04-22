@@ -180,6 +180,118 @@ export interface LLMTestResult {
   error?: string;
 }
 
+// ── Image Resize 类型 ────────────────────────────────────────────────────
+
+/** 缩放算法标识。本地经典算法 + 未来 LLM 超分（V2） */
+export type ResizeAlgorithmId =
+  | 'nearest'
+  | 'bilinear'
+  | 'bicubic'
+  | 'lanczos'
+  | 'llm-upscale';
+
+/** 算法分类，UI 分组展示用 */
+export type ResizeCategory = 'classical' | 'ai';
+
+/** 单个 Provider 的公开描述信息（UI 下拉菜单数据源） */
+export interface ResizeProviderInfo {
+  id: ResizeAlgorithmId;
+  displayName: string;
+  description: string;
+  category: ResizeCategory;
+  /** 当前是否可用（LLM 未配置时为 false） */
+  available: boolean;
+  /** 不可用时的提示文案 */
+  unavailableReason?: string;
+  supportsUpscale: boolean;
+  supportsDownscale: boolean;
+}
+
+/** 输出图像格式 */
+export type ResizeOutputFormat = 'jpeg' | 'png' | 'webp' | 'avif';
+
+/** resizeImage 调用参数 */
+export interface ResizeOptions {
+  algorithm: ResizeAlgorithmId;
+  /** 最大长边像素 N，长边缩放到该值，短边按比例 */
+  maxLongEdge: number;
+  outputFormat: ResizeOutputFormat;
+  /** 1-100，有损格式（jpeg/webp/avif）有效 */
+  quality?: number;
+  /** 是否将原 EXIF 写入输出文件。V1 恒为 true */
+  preserveExif: boolean;
+  /** V2 LLM Provider 扩展字段 */
+  llmOptions?: {
+    model?: string;
+    prompt?: string;
+    scale?: 2 | 4;
+  };
+}
+
+/** 原图元数据解析结果 */
+export interface ImageBasicInfo {
+  filename: string;
+  byteSize: number;
+  format: string;
+  colorSpace: string;
+  /** 纠正 EXIF Orientation 后的视觉宽 */
+  width: number;
+  /** 纠正 EXIF Orientation 后的视觉高 */
+  height: number;
+}
+
+/** parseImageMetadata 返回值 */
+export interface ParseMetadataResult {
+  /** 本次插件会话 ID，后续 resizeImage 调用需带上 */
+  sessionId: string;
+  basic: ImageBasicInfo;
+  /** exifr 完整解析结果（含 GPS），无 EXIF 时为 null */
+  exif: Record<string, unknown> | null;
+  /** 主进程生成的 256px 略缩图临时文件绝对路径（渲染进程 file:// 加载） */
+  thumbnailPath: string;
+}
+
+/** resizeImage 成功返回 */
+export interface ResizeSuccess {
+  ok: true;
+  /** 处理后的临时文件绝对路径（渲染进程 file:// 加载预览） */
+  tempOutputPath: string;
+  width: number;
+  height: number;
+  byteSize: number;
+  format: string;
+  durationMs: number;
+  /** 实际使用的算法 id（可能因 fallback 不同于请求值） */
+  actualAlgorithm: ResizeAlgorithmId;
+  /** 非致命警告（如 "bilinear 当前以 cubic 近似"） */
+  warnings?: string[];
+}
+
+/** resizeImage 错误返回 */
+export interface ResizeFailure {
+  ok: false;
+  error: {
+    code:
+      | 'DECODE_FAILED'
+      | 'UNSUPPORTED_FORMAT'
+      | 'DISK_FULL'
+      | 'LLM_NOT_CONFIGURED'
+      | 'LLM_API_ERROR'
+      | 'UNKNOWN';
+    message: string;
+    /** 调试用详细信息（可折叠展示） */
+    detail?: string;
+  };
+}
+
+export type ResizeResponse = ResizeSuccess | ResizeFailure;
+
+/** saveResizedImage 返回值 */
+export interface SaveResizedResult {
+  ok: boolean;
+  error?: string;
+}
+
 // ── ElectronAPI 主接口 ────────────────────────────────────────────────────
 
 export interface ElectronAPI {
@@ -266,4 +378,41 @@ export interface ElectronAPI {
 
   /** 测试当前配置的连通性，发送一条最小请求验证 API Key 有效性 */
   testLLMConnection(): Promise<LLMTestResult>;
+
+  // ── Image Resize ─────────────────────────────────────────────────────────
+
+  /**
+   * 列出所有缩放算法 Provider，包含可用性状态。
+   * UI 下拉菜单的数据源；新增算法零改前端。
+   */
+  listResizeProviders(): Promise<ResizeProviderInfo[]>;
+
+  /**
+   * 解析图片元数据（基本信息 + EXIF），同时生成 256px 略缩图。
+   *
+   * 首次调用会分配一个新的 sessionId；后续 resizeImage 需带上。
+   *
+   * @param filePath 本地图片绝对路径
+   */
+  parseImageMetadata(filePath: string): Promise<ParseMetadataResult>;
+
+  /**
+   * 按指定参数处理图片，结果写入临时文件，返回路径供渲染进程通过
+   * file:// 协议加载预览。
+   *
+   * @param inputPath 原图绝对路径
+   * @param options   处理参数
+   * @param sessionId 由 parseImageMetadata 返回的会话 id
+   */
+  resizeImage(
+    inputPath: string,
+    options: ResizeOptions,
+    sessionId: string
+  ): Promise<ResizeResponse>;
+
+  /**
+   * 将处理后的临时文件复制到用户指定的保存路径（另存为）。
+   * 临时文件不删除，保留到窗口关闭。
+   */
+  saveResizedImage(tempPath: string, targetPath: string): Promise<SaveResizedResult>;
 }

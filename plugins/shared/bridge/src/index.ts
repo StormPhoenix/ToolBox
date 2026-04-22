@@ -31,6 +31,18 @@ export type {
   LLMConfigPublic,
   LLMConfigInput,
   LLMTestResult,
+  // Image Resize 类型
+  ResizeAlgorithmId,
+  ResizeCategory,
+  ResizeProviderInfo,
+  ResizeOutputFormat,
+  ResizeOptions,
+  ImageBasicInfo,
+  ParseMetadataResult,
+  ResizeSuccess,
+  ResizeFailure,
+  ResizeResponse,
+  SaveResizedResult,
 } from './types';
 
 export { createLogger } from './logger';

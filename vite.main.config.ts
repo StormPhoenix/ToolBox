@@ -33,6 +33,10 @@ export default defineConfig({
     rollupOptions: {
       external: [
         'electron',
+        // 原生模块必须 external，避免被打包导致二进制加载失败
+        'sharp',
+        // exifr 走 CJS 动态路径，external 更稳妥
+        'exifr',
         ...NODE_BUILTINS,
       ],
       output: {

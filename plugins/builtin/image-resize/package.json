@@ -1,0 +1,17 @@
+{
+  "name": "toolbox-plugin-image-resize",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@toolbox/bridge": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^6.3.5",
+    "vue": "^3.5.13"
+  }
+}
