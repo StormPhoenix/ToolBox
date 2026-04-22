@@ -45,10 +45,11 @@ ToolBox/
 │       ├── main.ts                   # Vue 应用挂载入口
 │       ├── App.vue                   # 根组件（侧边栏 + 内容区布局）
 │       ├── components/
-│       │   ├── Sidebar.vue           # 左侧分类导航栏（支持折叠）
+│       │   ├── Sidebar.vue           # 左侧分类导航栏（支持折叠，底部含设置入口）
 │       │   ├── PluginCard.vue        # 单个工具卡片
 │       │   ├── ToolGrid.vue          # 工具网格列表
-│       │   └── ToolViewer.vue        # webview 插件查看器
+│       │   ├── ToolViewer.vue        # webview 插件查看器
+│       │   └── Settings.vue          # 设置页（LLM Provider / API Key / Model 配置）
 │       ├── composables/
 │       │   └── usePlugins.ts         # 插件注册表状态管理 composable
 │       ├── data/

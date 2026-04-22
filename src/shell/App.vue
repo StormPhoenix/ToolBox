@@ -8,9 +8,12 @@
 
     <!-- 主内容区 -->
     <main class="app-content">
+      <!-- 设置页 -->
+      <Settings v-if="activeCategoryId === 'settings'" />
+
       <!-- 查看插件详情 -->
       <ToolViewer
-        v-if="activePlugin"
+        v-else-if="activePlugin"
         :plugin="activePlugin"
         @back="activate(null)"
       />
@@ -32,6 +35,7 @@ import { ref, computed, onMounted } from 'vue';
 import Sidebar from './components/Sidebar.vue';
 import ToolGrid from './components/ToolGrid.vue';
 import ToolViewer from './components/ToolViewer.vue';
+import Settings from './components/Settings.vue';
 import { usePlugins } from './composables/usePlugins';
 import { CATEGORIES } from './data/categories';
 
