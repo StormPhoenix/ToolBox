@@ -63,7 +63,7 @@ import type { AppInfo } from '@toolbox/bridge';
 
 const appInfo = ref<AppInfo | null>(null);
 
-const stats = ref({ total: 1, builtin: 1, categories: 6 });
+const stats = ref({ total: 0, builtin: 0, categories: 0 });
 
 const guideSteps = [
   {
@@ -85,7 +85,12 @@ const guideSteps = [
 
 onMounted(async () => {
   try {
-    appInfo.value = await electronAPI.getAppInfo();
+    const [info, pluginStats] = await Promise.all([
+      electronAPI.getAppInfo(),
+      electronAPI.getPluginStats(),
+    ]);
+    appInfo.value = info;
+    stats.value = pluginStats;
   } catch {
     // 非 Electron 环境忽略
   }

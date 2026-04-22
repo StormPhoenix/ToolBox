@@ -38,4 +38,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 渲染进程日志转发（Shell / 插件 → 主进程写文件）
   log: (level: 'info' | 'warn' | 'error', tag: string, message: string) =>
     ipcRenderer.invoke('logger:log', level, tag, message),
+
+  // 插件统计信息
+  getPluginStats: () =>
+    ipcRenderer.invoke('get-plugin-stats'),
 });

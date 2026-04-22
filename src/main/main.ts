@@ -147,6 +147,21 @@ ipcMain.handle(
   }
 );
 
+// 插件统计（供 welcome 插件等使用）
+ipcMain.handle('get-plugin-stats', async () => {
+  try {
+    const registryPath = path.join(__dirname, '..', 'plugin-registry.json');
+    const raw = await fs.readFile(registryPath, 'utf-8');
+    const plugins = JSON.parse(raw) as Array<{ builtin?: boolean; category?: string }>;
+    const total = plugins.length;
+    const builtin = plugins.filter(p => p.builtin).length;
+    const categories = new Set(plugins.map(p => p.category).filter(Boolean)).size;
+    return { total, builtin, categories };
+  } catch {
+    return { total: 0, builtin: 0, categories: 0 };
+  }
+});
+
 // ─── 应用生命周期 ────────────────────────────────────────────
 
 app.whenReady().then(() => {

@@ -80,6 +80,14 @@ export interface DirEntry {
   path: string;
 }
 
+// ── 插件统计 ──────────────────────────────────────────────────────────────
+
+export interface PluginStats {
+  total: number;
+  builtin: number;
+  categories: number;
+}
+
 // ── ElectronAPI 主接口 ────────────────────────────────────────────────────
 
 export interface ElectronAPI {
@@ -119,4 +127,7 @@ export interface ElectronAPI {
    * debug 级别在调用方已过滤，不应传入此方法。
    */
   log(level: 'info' | 'warn' | 'error', tag: string, message: string): Promise<void>;
+
+  /** 获取插件注册表统计信息（总数、内置数、分类数） */
+  getPluginStats(): Promise<PluginStats>;
 }
