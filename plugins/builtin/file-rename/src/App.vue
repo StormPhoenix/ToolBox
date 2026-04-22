@@ -219,28 +219,43 @@ const canExecute = computed(() =>
 const listRef = ref<HTMLElement | null>(null);
 let sortable: Sortable | null = null;
 
-onMounted(() => {
-  if (listRef.value) {
-    sortable = Sortable.create(listRef.value, {
-      handle: '.drag-handle',
-      animation: 150,
-      ghostClass: 'sortable-ghost',
-      onEnd(evt) {
-        const { oldIndex, newIndex } = evt;
-        if (oldIndex === undefined || newIndex === undefined) return;
-        if (oldIndex === newIndex) return;
-        const arr = [...files.value];
-        const [moved] = arr.splice(oldIndex, 1);
-        arr.splice(newIndex, 0, moved);
-        files.value = arr;
-        applyRule();
-      },
-    });
+function initSortable(): void {
+  if (sortable || !listRef.value) return;
+  sortable = Sortable.create(listRef.value, {
+    handle: '.drag-handle',
+    animation: 150,
+    ghostClass: 'sortable-ghost',
+    chosenClass: 'sortable-chosen',
+    onEnd(evt) {
+      const { oldIndex, newIndex } = evt;
+      if (oldIndex === undefined || newIndex === undefined) return;
+      if (oldIndex === newIndex) return;
+      const arr = [...files.value];
+      const [moved] = arr.splice(oldIndex, 1);
+      arr.splice(newIndex, 0, moved);
+      files.value = arr;
+      applyRule();
+    },
+  });
+}
+
+// listRef 在 files 从空变为非空后才挂载到 DOM，需等 nextTick 再初始化
+watch(
+  () => files.value.length > 0,
+  async (hasFiles) => {
+    if (hasFiles) {
+      await nextTick();
+      initSortable();
+    } else {
+      sortable?.destroy();
+      sortable = null;
+    }
   }
-});
+);
 
 onUnmounted(() => {
   sortable?.destroy();
+  sortable = null;
 });
 
 // ── 文件输入 — 拖放 ───────────────────────────────────────────────────────
@@ -1126,9 +1141,14 @@ const ruleLabels: Record<RuleType, string> = {
   }
 }
 
-/* ── SortableJS ghost ── */
+/* ── SortableJS ghost / chosen ── */
 :deep(.sortable-ghost) {
   opacity: 0.4;
   background: var(--bg-active) !important;
+}
+
+:deep(.sortable-chosen) {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: rgba(108, 92, 231, 0.08) !important;
 }
 </style>
