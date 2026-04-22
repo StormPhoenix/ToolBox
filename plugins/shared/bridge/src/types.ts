@@ -104,6 +104,9 @@ export interface ElectronAPI {
   /** 列出目录内容 */
   readDir(dirPath: string): Promise<DirEntry[]>;
 
+  /** 重命名（或移动）文件 */
+  renameFile(oldPath: string, newPath: string): Promise<void>;
+
   /** 在系统资源管理器中打开路径 */
   openInExplorer(targetPath: string): Promise<void>;
 

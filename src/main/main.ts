@@ -134,6 +134,10 @@ ipcMain.handle('fs:readDir', async (_e, dirPath: string) => {
   }));
 });
 
+ipcMain.handle('fs:renameFile', async (_e, oldPath: string, newPath: string) => {
+  await fs.rename(oldPath, newPath);
+});
+
 // 系统
 ipcMain.handle('shell:openInExplorer', (_e, targetPath: string) =>
   shell.openPath(targetPath)

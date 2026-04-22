@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readDir: (dirPath: string) =>
     ipcRenderer.invoke('fs:readDir', dirPath),
 
+  renameFile: (oldPath: string, newPath: string) =>
+    ipcRenderer.invoke('fs:renameFile', oldPath, newPath),
+
   // 系统
   openInExplorer: (targetPath: string) =>
     ipcRenderer.invoke('shell:openInExplorer', targetPath),

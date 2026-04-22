@@ -1,0 +1,10 @@
+{
+  "id": "file-rename",
+  "name": "文件重命名",
+  "description": "批量重命名文件，支持查找替换、前后缀、序号、手动编辑",
+  "category": "file",
+  "icon": "✏️",
+  "entry": "index.html",
+  "version": "1.0.0",
+  "builtin": true
+}
