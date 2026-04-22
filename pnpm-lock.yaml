@@ -108,6 +108,22 @@ importers:
         specifier: ^3.5.13
         version: 3.5.32(typescript@5.9.3)
 
+  plugins/builtin/wallpaper-maker:
+    dependencies:
+      '@toolbox/bridge':
+        specifier: workspace:*
+        version: link:../../shared/bridge
+    devDependencies:
+      '@vitejs/plugin-vue':
+        specifier: ^5.2.1
+        version: 5.2.4(vite@6.4.2(@types/node@20.19.39)(lightningcss@1.32.0))(vue@3.5.32(typescript@5.9.3))
+      vite:
+        specifier: ^6.3.5
+        version: 6.4.2(@types/node@20.19.39)(lightningcss@1.32.0)
+      vue:
+        specifier: ^3.5.13
+        version: 3.5.32(typescript@5.9.3)
+
   plugins/builtin/welcome:
     dependencies:
       '@toolbox/bridge':

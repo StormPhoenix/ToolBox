@@ -1,0 +1,10 @@
+{
+  "id": "wallpaper-maker",
+  "name": "壁纸制作器",
+  "description": "将图片裁剪为各设备壁纸尺寸，支持多设备批量导出",
+  "category": "image",
+  "icon": "🖼️",
+  "entry": "index.html",
+  "version": "1.0.0",
+  "builtin": true
+}
