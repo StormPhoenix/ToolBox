@@ -65,6 +65,7 @@ ToolBox/
 │       ├── pdf-merge/                # PDF 合并插件
 │       ├── pdf-split/                # PDF 拆分插件
 │       ├── pdf-editor/               # PDF 编辑插件
+│       ├── file-rename/              # 批量重命名插件
 │       └── welcome/                  # 欢迎页插件（示例）
 │           ├── manifest.json         # 插件元数据
 │           ├── package.json          # 独立 npm 包
@@ -169,6 +170,7 @@ plugins/
 | `writeFile(path, data, encoding?)` | `fs:writeFile` | 写入文件 |
 | `readDir(path)` | `fs:readDir` | 列出目录内容 |
 | `openInExplorer(path)` | `shell:openInExplorer` | 在资源管理器中打开 |
+| `renameFile(oldPath, newPath)` | `fs:renameFile` | 重命名/移动文件（批量重命名插件使用） |
 | `getPathForFile(file)` | —（preload `webUtils`） | 获取 File 对象的系统路径 |
 | `log(level, tag, message)` | `logger:log` | 渲染进程/插件日志转发到主进程写文件 |
 
@@ -302,6 +304,7 @@ const result = await electronAPI.showOpenDialog({ properties: ['openFile'] });
 |---|---|---|
 | `README.md` | 概述 | 项目简介、快速上手 |
 | `docs/plugin-bridge.md` | 技术 | `@toolbox/bridge` 与 webview 插件 API 访问说明 |
+| `docs/design/file-rename-plugin-design.md` | 需求/设计 | 批量重命名插件功能规格、UI 设计、IPC 扩展方案 |
 
 > 新增文档后请在此表登记。
 
