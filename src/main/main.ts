@@ -8,6 +8,7 @@ import {
   createLogger,
   writeRendererLog,
 } from './logger';
+import { registerLLMHandlers } from './llm/llm-ipc';
 
 // 构建期由 vite.main.config.ts define 注入的全局常量
 declare const __GIT_HASH__: string;
@@ -179,6 +180,7 @@ ipcMain.handle('get-plugin-stats', async () => {
 app.whenReady().then(() => {
   cleanOldLogs();
   printStartupBanner();
+  registerLLMHandlers();
   log.info('应用初始化完成');
 
   createSplashWindow();

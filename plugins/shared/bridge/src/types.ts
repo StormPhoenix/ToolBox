@@ -94,6 +94,78 @@ export interface PluginStats {
   categories: number;
 }
 
+// ── LLM 类型 ──────────────────────────────────────────────────────────────
+
+/** LLM 支持的 Provider 类型 */
+export type LLMProviderType = 'claude' | 'openai' | 'gemini';
+
+/**
+ * LLM 消息内容块
+ * - 纯文本：{ type: 'text', text: string }
+ * - 图片：{ type: 'image', source: { type: 'base64', media_type, data } }
+ *   插件侧自行将文件读为 base64 后传入
+ */
+export type LLMMessageContent =
+  | string
+  | Array<
+      | { type: 'text'; text: string }
+      | {
+          type: 'image';
+          source: {
+            type: 'base64';
+            media_type: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+            data: string;
+          };
+        }
+    >;
+
+/** llmChat 调用参数中的单条消息 */
+export interface LLMMessage {
+  role: 'user' | 'assistant';
+  content: LLMMessageContent;
+}
+
+/** llmChat 可选项 */
+export interface LLMChatOptions {
+  /** 可选的 system prompt */
+  system?: string;
+}
+
+/** llmChat 返回结果 */
+export interface LLMChatResult {
+  text: string;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+  };
+}
+
+/** getLLMConfig 返回的脱敏配置（apiKey 替换为掩码） */
+export interface LLMConfigPublic {
+  provider: LLMProviderType;
+  claude?: { apiKeyMasked: string; baseURL?: string; model: string };
+  openai?: { apiKeyMasked: string; baseURL?: string; model: string };
+  gemini?: { apiKeyMasked: string; baseURL?: string; model: string };
+  maxTokens?: number;
+  /** 当前 provider 是否已配置可用 */
+  available: boolean;
+}
+
+/** setLLMConfig 接收的输入（可部分更新，apiKey 传空字符串表示不变） */
+export interface LLMConfigInput {
+  provider?: LLMProviderType;
+  claude?: { apiKey?: string; baseURL?: string; model?: string };
+  openai?: { apiKey?: string; baseURL?: string; model?: string };
+  gemini?: { apiKey?: string; baseURL?: string; model?: string };
+  maxTokens?: number;
+}
+
+/** testLLMConnection 返回结果 */
+export interface LLMTestResult {
+  ok: boolean;
+  error?: string;
+}
+
 // ── ElectronAPI 主接口 ────────────────────────────────────────────────────
 
 export interface ElectronAPI {
@@ -139,4 +211,45 @@ export interface ElectronAPI {
 
   /** 获取插件注册表统计信息（总数、内置数、分类数） */
   getPluginStats(): Promise<PluginStats>;
+
+  // ── LLM ──────────────────────────────────────────────────────────────────
+
+  /**
+   * 单次非流式 LLM 调用。
+   *
+   * 使用在 Settings 中配置的当前 Provider，无需插件感知具体模型。
+   *
+   * content 支持纯字符串或 block 数组（多模态场景传 image block）。
+   *
+   * @example
+   * // 纯文本
+   * const result = await electronAPI.llmChat(
+   *   [{ role: 'user', content: '帮我分析这个文件名...' }],
+   *   { system: '你是一个文件重命名助手' }
+   * );
+   *
+   * @example
+   * // 带图片（插件自行读文件转 base64）
+   * const b64 = await electronAPI.readFile(path, 'base64');
+   * const result = await electronAPI.llmChat([{
+   *   role: 'user',
+   *   content: [
+   *     { type: 'text', text: '描述这张图片' },
+   *     { type: 'image', source: { type: 'base64', media_type: 'image/png', data: b64 } }
+   *   ]
+   * }]);
+   */
+  llmChat(messages: LLMMessage[], options?: LLMChatOptions): Promise<LLMChatResult>;
+
+  /** 获取当前 LLM 配置（脱敏，apiKey 已掩码） */
+  getLLMConfig(): Promise<LLMConfigPublic>;
+
+  /**
+   * 更新 LLM 配置。
+   * 只传入需要变更的字段；apiKey 传空字符串或不传均表示保留原值。
+   */
+  setLLMConfig(config: LLMConfigInput): Promise<void>;
+
+  /** 测试当前配置的连通性，发送一条最小请求验证 API Key 有效性 */
+  testLLMConnection(): Promise<LLMTestResult>;
 }

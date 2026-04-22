@@ -28,7 +28,15 @@ ToolBox/
 │   ├── main/                         # Electron 主进程（Node.js 环境）
 │   │   ├── main.ts                   # 应用入口、窗口管理、所有 IPC handlers
 │   │   ├── preload.ts                # contextBridge 安全 API 暴露
-│   │   └── logger.ts                 # 主进程日志工具（文件持久化、EPIPE 保护）
+│   │   ├── logger.ts                 # 主进程日志工具（文件持久化、EPIPE 保护）
+│   │   └── llm/                      # LLM 框架（主进程侧）
+│   │       ├── types.ts              # 统一 LLM 类型（Provider 接口、配置类型等）
+│   │       ├── router.ts             # LLMRouter — Provider 路由与生命周期管理
+│   │       ├── llm-ipc.ts            # IPC handler 注册（registerLLMHandlers）
+│   │       └── providers/
+│   │           ├── claude.ts         # ClaudeProvider（@anthropic-ai/sdk）
+│   │           ├── openai.ts         # OpenAIProvider（openai SDK，兼容第三方）
+│   │           └── gemini.ts         # GeminiProvider（@google/genai）
 │   ├── renderer/                     # 启动页（Splash Screen）
 │   │   ├── splash.html               # 启动页 HTML
 │   │   └── splash.css                # 启动页样式
@@ -175,6 +183,10 @@ plugins/
 | `getPathForFile(file)` | —（preload `webUtils`） | 获取 File 对象的系统路径 |
 | `log(level, tag, message)` | `logger:log` | 渲染进程/插件日志转发到主进程写文件 |
 | `getPluginStats()` | `get-plugin-stats` | 获取插件注册表统计（total / builtin / categories） |
+| `llmChat(messages, options?)` | `llm:chat` | 单次非流式 LLM 调用，返回 `{ text, usage? }` |
+| `getLLMConfig()` | `llm:get-config` | 获取当前 LLM 配置（脱敏，apiKey 掩码） |
+| `setLLMConfig(config)` | `llm:set-config` | 更新 LLM 配置（provider / apiKey / model / baseURL） |
+| `testLLMConnection()` | `llm:test-connection` | 测试当前配置连通性，返回 `{ ok, error? }` |
 
 **新增 IPC 通道三步骤：**
 1. `src/main/main.ts` — `ipcMain.handle('channel', handler)`
@@ -307,6 +319,7 @@ const result = await electronAPI.showOpenDialog({ properties: ['openFile'] });
 | `README.md` | 概述 | 项目简介、快速上手 |
 | `docs/plugin-bridge.md` | 技术 | `@toolbox/bridge` 与 webview 插件 API 访问说明 |
 | `docs/design/file-rename-plugin-design.md` | 需求/设计 | 批量重命名插件功能规格、UI 设计、IPC 扩展方案 |
+| `docs/tech/llm-framework.md` | 技术 | LLM 框架架构、Provider 配置、插件调用指南 |
 
 > 新增文档后请在此表登记。
 

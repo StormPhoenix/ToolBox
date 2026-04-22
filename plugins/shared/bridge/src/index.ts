@@ -22,6 +22,15 @@ export type {
   OpenDialogReturnValue,
   SaveDialogOptions,
   SaveDialogReturnValue,
+  // LLM 类型
+  LLMProviderType,
+  LLMMessageContent,
+  LLMMessage,
+  LLMChatOptions,
+  LLMChatResult,
+  LLMConfigPublic,
+  LLMConfigInput,
+  LLMTestResult,
 } from './types';
 
 export { createLogger } from './logger';

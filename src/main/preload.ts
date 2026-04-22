@@ -45,4 +45,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 插件统计信息
   getPluginStats: () =>
     ipcRenderer.invoke('get-plugin-stats'),
+
+  // ── LLM ──────────────────────────────────────────────────
+  llmChat: (
+    messages: Array<{ role: 'user' | 'assistant'; content: unknown }>,
+    options?: { system?: string }
+  ) => ipcRenderer.invoke('llm:chat', messages, options),
+
+  getLLMConfig: () =>
+    ipcRenderer.invoke('llm:get-config'),
+
+  setLLMConfig: (config: unknown) =>
+    ipcRenderer.invoke('llm:set-config', config),
+
+  testLLMConnection: () =>
+    ipcRenderer.invoke('llm:test-connection'),
 });
