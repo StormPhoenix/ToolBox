@@ -261,6 +261,46 @@ import { electronAPI } from '@toolbox/bridge';
 const result = await electronAPI.showOpenDialog({ properties: ['openFile'] });
 ```
 
+**在插件中发送图片给 LLM 分析：**
+
+`@toolbox/bridge` 提供 LLM 图片辅助函数，无需手动组装消息块：
+
+```typescript
+import { electronAPI, inferImageMediaType, buildImageMessage } from '@toolbox/bridge';
+
+// 1. 推断 MIME 类型（支持 jpg/jpeg/png/gif/webp）
+const mediaType = inferImageMediaType(filePath); // → 'image/jpeg' | null
+if (!mediaType) throw new Error('不支持的图片格式');
+
+// 2. 读取文件为 base64
+const base64 = await electronAPI.readFile(filePath, 'base64');
+
+// 3. 构造消息并调用 LLM
+const msg = buildImageMessage(base64, mediaType, '请描述这张图片的内容');
+const result = await electronAPI.llmChat([msg], { system: '你是图像分析助手' });
+console.log(result.text);
+```
+
+多图片场景使用 `buildMultiImageMessage`：
+
+```typescript
+import { buildMultiImageMessage } from '@toolbox/bridge';
+
+const msg = buildMultiImageMessage(
+  [
+    { base64: base64A, mediaType: 'image/png' },
+    { base64: base64B, mediaType: 'image/jpeg' },
+  ],
+  '对比这两张图片的差异'
+);
+```
+
+| 函数 | 说明 |
+|---|---|
+| `inferImageMediaType(filePath)` | 从路径后缀推断 MIME，不支持时返回 `null` |
+| `buildImageMessage(base64, mediaType, textPrompt?)` | 构造单图 user 消息 |
+| `buildMultiImageMessage(images[], textPrompt?)` | 构造多图 user 消息 |
+
 ---
 
 ## 6. 设计系统
