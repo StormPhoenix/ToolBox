@@ -53,6 +53,8 @@ export type {
   ChatAttachmentInput,
   ChatSendInput,
   ChatSendResult,
+  ChatExportInput,
+  ChatExportResult,
   ChatEvent,
   LLMImageRefBlock,
 } from './types';

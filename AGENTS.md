@@ -236,6 +236,7 @@ plugins/
 | `chatSend(input)` | `chat:send` | 发送用户消息；立即返回 `{ requestId, userMessageId }`，真实回复通过 `chat:event` 事件流推送 |
 | `chatAbort(requestId)` | `chat:abort` | 中止指定进行中的请求 |
 | `chatResendImageRef(ref)` | `chat:resend-image-ref` | 根据历史 `imageRef` 读缓存文件返回 `ChatAttachmentInput`，供 Composer 再次使用 |
+| `chatExportSelected(input)` | `chat:export-selected` | 把选中的消息合并导出为 Markdown 文件；在 targetPath 同级创建 `<stem>/` 子目录，写入 `.md` 和 `images/` 子目录 |
 | `onChatEvent(cb)` | `chat:event`（push） | 订阅 Chat 事件流（`stream-chunk` / `stream-end` / `error` / `aborted`），返回 dispose 函数 |
 
 **新增 IPC 通道三步骤：**

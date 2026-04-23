@@ -2,6 +2,7 @@
   <div
     ref="scrollRef"
     class="message-list"
+    :class="{ 'selection-mode': selectionMode }"
     @scroll="onScroll"
   >
     <div class="message-list-inner">
@@ -17,13 +18,18 @@
         v-for="msg in messages"
         :key="msg.id"
         :message="msg"
+        :selection-mode="selectionMode"
+        :selected="isSelected(msg.id)"
         @open-lightbox="(p) => $emit('open-lightbox', p)"
         @resend-image="(r) => $emit('resend-image', r)"
+        @toggle-select="(id) => $emit('toggle-select', id)"
+        @enter-selection="(id) => $emit('enter-selection', id)"
       />
 
-      <StreamingBubble v-if="isStreaming" :text="streamingText" />
+      <!-- 流式气泡：选择态下不展示，避免用户误以为能选 -->
+      <StreamingBubble v-if="isStreaming && !selectionMode" :text="streamingText" />
 
-      <div v-if="errorMessage" class="error-banner">
+      <div v-if="errorMessage && !selectionMode" class="error-banner">
         <span class="error-text">{{ errorMessage }}</span>
         <button class="error-dismiss" type="button" @click="$emit('dismiss-error')">
           ✕
@@ -64,6 +70,10 @@ const props = defineProps<{
   streamingText: string;
   isStreaming: boolean;
   errorMessage: string | null;
+  /** 选择态：显示 checkbox 列、禁用流式气泡与错误条 */
+  selectionMode?: boolean;
+  /** 判断某条消息是否已选中 */
+  isSelected?: (id: string) => boolean;
 }>();
 
 defineEmits<{
@@ -75,7 +85,14 @@ defineEmits<{
     mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
     fileName: string;
   }];
+  'toggle-select': [id: string];
+  'enter-selection': [id: string];
 }>();
+
+// 默认未提供 isSelected 时返回 false
+const isSelected = (id: string): boolean => {
+  return props.isSelected ? props.isSelected(id) : false;
+};
 
 const scrollRef = ref<HTMLElement | null>(null);
 const autoScroll = ref(true);

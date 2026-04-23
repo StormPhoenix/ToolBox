@@ -31,6 +31,11 @@ import {
   type LLMImageRefBlock,
   type SupportedMediaType,
 } from './image-cache';
+import {
+  exportSelectedMessages,
+  type ChatExportInput,
+  type ChatExportResult,
+} from './exporter';
 import { createLogger } from '../logger';
 
 const log = createLogger('Chat-IPC');
@@ -141,6 +146,24 @@ export function registerChatHandlers(): void {
         mediaType: ref.mediaType,
         base64,
       };
+    }
+  );
+
+  // ── chat:export-selected ────────────────────────────────
+  // 把选中的消息合并写成 Markdown（+ 同级 images/ 子目录）
+  ipcMain.handle(
+    'chat:export-selected',
+    async (_e, input: ChatExportInput): Promise<ChatExportResult> => {
+      if (!input?.sessionId) throw new Error('缺少 sessionId');
+      if (!Array.isArray(input.messageIds) || input.messageIds.length === 0) {
+        throw new Error('未选中任何消息');
+      }
+      if (!input.targetPath) throw new Error('缺少目标保存路径');
+
+      log.info(
+        `chat:export-selected sessionId=${input.sessionId}, ids=${input.messageIds.length}, target=${input.targetPath}`
+      );
+      return exportSelectedMessages(input);
     }
   );
 

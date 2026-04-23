@@ -425,6 +425,31 @@ export interface ChatSendResult {
   userMessageId: string;
 }
 
+/** chat:export-selected 入参 */
+export interface ChatExportInput {
+  sessionId: string;
+  /** 选中的消息 id 列表；主进程按时间顺序重排 */
+  messageIds: string[];
+  /** 用户在 showSaveDialog 中选定的 .md 目标路径 */
+  targetPath: string;
+  /** 是否在 Markdown 头部写入导出时间/模型/消息数，默认 true */
+  includeMetadata?: boolean;
+}
+
+/** chat:export-selected 出参 */
+export interface ChatExportResult {
+  /** 最终 .md 文件的绝对路径（位于新建的 <stem>/ 子目录中） */
+  filePath: string;
+  /** 所在子目录绝对路径，可用于 openInExplorer 跳转 */
+  dirPath: string;
+  /** 实际写入的消息数 */
+  messageCount: number;
+  /** 成功复制的图片数 */
+  imageCount: number;
+  /** 缓存丢失跳过的图片数 */
+  skippedImageCount: number;
+}
+
 /** Chat 事件（主进程推送给渲染进程） */
 export type ChatEvent =
   | { kind: 'stream-chunk'; requestId: string; text: string }
@@ -628,6 +653,12 @@ export interface ElectronAPI {
     mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
     fileName: string;
   }): Promise<ChatAttachmentInput | null>;
+
+  /**
+   * 把选中的多条消息合并导出为 Markdown 文件。
+   * 主进程会在 targetPath 同级创建 <stem>/ 子目录，写入 .md 和 images/ 子目录。
+   */
+  chatExportSelected(input: ChatExportInput): Promise<ChatExportResult>;
 
   /**
    * 订阅 Chat 事件流。

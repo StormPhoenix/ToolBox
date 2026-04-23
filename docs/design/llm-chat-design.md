@@ -329,3 +329,165 @@ UI 层 `<img :src="toolbox-img://${hash}.${ext}">` 零 base64 内存占用，切
 - 截图工具输入
 - 图片编辑 / 旋转 / 裁剪
 
+---
+
+## 10. V1.2 — 多选合并导出（已落地 P0）
+
+### 10.1 需求
+
+当会话非生成态时，用户可对多条已落库的消息批量选中，并：
+
+1. 合并复制为 Markdown（文本 + HTML 双份剪贴板）
+2. 合并导出为 Markdown 文件（含图片副本子目录）
+
+同时每条已落库消息单独具备：hover 展示复制按钮、一键复制单条气泡内容。
+
+### 10.2 入口与交互
+
+| 触发 | 行为 |
+|---|---|
+| hover 消息气泡 | 气泡下方浮出 `BubbleToolbar`（复制 · 多选 两个图标） |
+| 点击 **复制** icon | 该条消息写入剪贴板（text/plain + text/html），icon 切换 ✓ 1s 后复原；**不**进入选择模式 |
+| 点击 **多选** icon（checklist）| 进入选择模式，预选中触发条；底部 `SelectionToolbar` 替换 `Composer` 位置 |
+| 选择模式下点击气泡整行 | 切换该条选中状态；图片点击不开 Lightbox、改为切换选中 |
+| `⌘/Ctrl + A` | 全选（仅选择模式下） |
+| `Esc` | 退出选择模式 |
+| SelectionToolbar "取消" | 同上 |
+
+**hover 工具栏**通过 `.bubble-hover-zone` 包围盒触发，离开气泡但进入工具栏时仍保持可见；`position: absolute`，不占文档流高度，避免消息列表抖动。
+
+**流式气泡、错误条、乐观 pending 消息**均不参与选择，不显示 hover 工具栏。
+
+### 10.3 状态模型
+
+状态位于 `composables/useChat.ts` 全局单例：
+
+```ts
+selectionMode: Ref<boolean>;
+selectedIds:   Ref<Set<string>>;    // 消息 id 集合（克隆替换触发响应式）
+selectedCount: ComputedRef<number>;
+enterSelection(preselectId?): void;
+exitSelection(): void;
+toggleSelect(id): void;
+selectAll(): void;
+isSelected(id): boolean;
+```
+
+自动退出场景（watch）：
+- `activeSession.id` 变化（切换/删除会话）
+- `currentRequestId` 从 null 变为非空（开始流式生成）
+
+### 10.4 剪贴板格式
+
+**单条复制**与**选中合并复制**共享同一套格式策略：
+
+- `text/plain`：原始 Markdown
+  - assistant 文本原样（保留代码围栏）
+  - user 文本按段分隔，段内换行用行尾两空格保留
+  - 图片降级为占位 `![fileName](toolbox-img://hash.ext)`
+- `text/html`：粘贴到富文本编辑器的兜底
+  - assistant 文本包在 `<pre>` 中粗略转义
+  - user 文本按段拆为 `<p>…</p>`
+  - 图片以斜体占位文本出现
+
+### 10.5 Markdown 文件导出
+
+新增 IPC：`chat:export-selected`
+
+```ts
+chatExportSelected(input: {
+  sessionId: string;
+  messageIds: string[];   // 主进程按会话时间序重排，忽略点选顺序
+  targetPath: string;     // 用户 showSaveDialog 选定的 .md 路径
+  includeMetadata?: boolean; // 默认 true
+}): Promise<{
+  filePath: string; dirPath: string;
+  messageCount: number; imageCount: number; skippedImageCount: number;
+}>;
+```
+
+主进程 `src/main/chat/exporter.ts` 流程：
+
+```
+showSaveDialog → targetPath = "<dir>/<stem>.md"
+                 │
+                 ▼
+主进程新建 <dir>/<stem>/ 子目录：
+  ├── <stem>.md          主文件
+  └── images/            图片副本
+      └── <hash>.<ext>   从 chat-images/<hash>.<ext> 复制
+```
+
+**为什么建子目录而不是直接 .md + 同级 images/**：多次导出到同一目录不会互相污染 `images/` 目录。
+
+**图片复制**：
+- 以 hash 为文件名，目标存在则复用（天然幂等）
+- `cachePath` 读取失败（文件丢失）则记为 `skippedImageCount`，Markdown 内降级为 `> 图片缺失：<fileName>`
+
+**Markdown 结构**：
+
+```markdown
+# <会话标题>
+
+> 导出时间：YYYY-MM-DD HH:mm
+> 模型：<provider · model>
+> 共 N 条消息（🧑 u / 🤖 a）
+
+---
+
+### 🧑 你 · YYYY-MM-DD HH:mm
+
+![photo.png](./images/ab12cd...ef.png)
+
+用户文本（段内硬换行用两空格保留）。
+
+---
+
+### 🤖 助手 · YYYY-MM-DD HH:mm
+
+助手的 Markdown 内容原样嵌入，保留代码围栏：
+
+```ts
+const x = 1;
+```
+
+---
+```
+
+文件名净化：非法字符（`\ / : * ? " < > |` + 控制字符）替换为 `_`，截断 ≤ 80 字符。
+
+### 10.6 边界与错误恢复
+
+| 场景 | 处理 |
+|---|---|
+| 切会话 / 删会话 | 自动退出选择模式（watch 监听 id 变化） |
+| 开始新的流式生成 | 自动退出（watch `currentRequestId`） |
+| 选中 pending 乐观消息 | 整行点击/图片点击 均忽略（id 以 `pending-` 开头） |
+| 选中 0 条 | 复制 / 导出按钮禁用 |
+| 缓存图片丢失 | Markdown 占位 `> 图片缺失：<name>`，导出流程不阻塞，统计入 `skippedImageCount` |
+| 导出成功 | toast 显示消息/图片数，附"打开文件夹"按钮 → `openInExplorer` |
+| 导出失败 | toast 显示红色错误条 |
+
+### 10.7 组件改动清单
+
+| 文件 | 职责 |
+|---|---|
+| 【新】`src/main/chat/exporter.ts` | Markdown 序列化 + 图片复制 + 子目录创建 |
+| `src/main/chat/chat-ipc.ts` | 注册 `chat:export-selected` |
+| `src/main/preload.ts` | 暴露 `chatExportSelected` |
+| `plugins/shared/bridge/src/types.ts` / `index.ts` | 新增 `ChatExportInput` / `ChatExportResult` + API 签名 |
+| `src/shell/composables/useChat.ts` | 选择状态 + actions + 自动退出 watch |
+| 【新】`src/shell/components/chat/BubbleToolbar.vue` | hover 工具栏（复制 + 多选） |
+| 【新】`src/shell/components/chat/SelectionToolbar.vue` | 底部工具栏（全选/复制/导出/取消） |
+| `src/shell/components/chat/MessageBubble.vue` | hover-zone + 选择态样式 + 整行点击切换 |
+| `src/shell/components/chat/MessageList.vue` | 透传 selection props；选择态下隐藏流式气泡与错误条 |
+| `src/shell/components/chat/ChatView.vue` | 挂载 SelectionToolbar、`v-show` 保活 Composer、键盘监听、toast、导出流程 |
+
+### 10.8 待 P1 追加
+
+- `Shift + 点击` 区间选择 / 反选按钮
+- 导出为 JSON（备份语义）
+- 元信息开关（时间/模型头是否写入）
+- 更丰富的复制视觉反馈（除 icon 切换外加入 toast）
+
+

@@ -1,51 +1,91 @@
 <template>
-  <div class="bubble-row" :class="[`role-${message.role}`]">
-    <div class="bubble">
-      <!-- 图片网格（仅 user 消息会有） -->
-      <div
-        v-if="imageItems.length > 0"
-        class="bubble-images"
-        :class="layoutClass"
-      >
+  <div
+    class="bubble-row"
+    :class="[
+      `role-${message.role}`,
+      {
+        'selection-mode': selectionMode,
+        selected: selected,
+        selectable: selectionMode,
+      },
+    ]"
+    @click="onRowClick"
+  >
+    <!-- 选择模式下最左侧的 checkbox 列 -->
+    <div v-if="selectionMode" class="bubble-checkbox" aria-hidden="true">
+      <span class="checkbox-box" :class="{ checked: selected }">
+        <span v-if="selected" class="checkbox-tick">✓</span>
+      </span>
+    </div>
+
+    <div class="bubble-hover-zone">
+      <div ref="bubbleRef" class="bubble">
+        <!-- 图片网格（仅 user 消息会有） -->
         <div
-          v-for="(item, i) in visibleImages"
-          :key="i"
-          class="bubble-image-cell"
-          @click="openLightbox(i)"
+          v-if="imageItems.length > 0"
+          class="bubble-images"
+          :class="layoutClass"
         >
-          <img :src="item.src" class="bubble-image" alt="" draggable="false" />
-          <!-- 最后一格：超出 9 张显示 +N -->
-          <div v-if="i === 8 && overflow > 0" class="bubble-image-overflow">
-            +{{ overflow }}
-          </div>
-          <!-- 重新发送按钮（仅 image_ref 有 cachePath 时才显示） -->
-          <button
-            v-if="item.ref"
-            class="bubble-image-resend"
-            type="button"
-            title="重新发送此图"
-            @click.stop="resend(item.ref)"
+          <div
+            v-for="(item, i) in visibleImages"
+            :key="i"
+            class="bubble-image-cell"
+            @click="onImageCellClick(i, $event)"
           >
-            ⟳
-          </button>
+            <img :src="item.src" class="bubble-image" alt="" draggable="false" />
+            <!-- 最后一格：超出 9 张显示 +N -->
+            <div v-if="i === 8 && overflow > 0" class="bubble-image-overflow">
+              +{{ overflow }}
+            </div>
+            <!-- 重新发送按钮（仅非选择态 + image_ref 有 cachePath 时才显示） -->
+            <button
+              v-if="item.ref && !selectionMode"
+              class="bubble-image-resend"
+              type="button"
+              title="重新发送此图"
+              @click.stop="resend(item.ref)"
+            >
+              ⟳
+            </button>
+          </div>
         </div>
+
+        <!-- 文本内容：assistant 走 Markdown，user 走纯文本 -->
+        <MarkdownView
+          v-if="message.role === 'assistant'"
+          ref="markdownRef"
+          :text="textContent"
+        />
+        <div v-else-if="textContent" class="bubble-user-text">{{ textContent }}</div>
       </div>
 
-      <!-- 文本内容：assistant 走 Markdown，user 走纯文本 -->
-      <MarkdownView v-if="message.role === 'assistant'" :text="textContent" />
-      <div v-else-if="textContent" class="bubble-user-text">{{ textContent }}</div>
+      <!-- hover 工具栏（选择态与流式气泡不显示；乐观 pending 消息也不显示） -->
+      <BubbleToolbar
+        v-if="showToolbar"
+        class="bubble-toolbar-slot"
+        :message="message"
+        :role="message.role"
+        :text-content="textContent"
+        :html-provider="htmlProvider"
+        @enter-selection="$emit('enter-selection', message.id)"
+      />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { ChatMessage, LLMImageRefBlock } from '@toolbox/bridge';
 import MarkdownView from './MarkdownView.vue';
+import BubbleToolbar from './BubbleToolbar.vue';
 import type { LightboxItem } from './ImageLightbox.vue';
 
 const props = defineProps<{
   message: ChatMessage;
+  /** 当前是否处于选择模式 */
+  selectionMode?: boolean;
+  /** 该条消息是否已被选中 */
+  selected?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -56,6 +96,8 @@ const emit = defineEmits<{
     mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
     fileName: string;
   }];
+  'toggle-select': [id: string];
+  'enter-selection': [id: string];
 }>();
 
 // ── 内容解析 ─────────────────────────────────────────────
@@ -161,6 +203,23 @@ function openLightbox(index: number): void {
   emit('open-lightbox', { items, index });
 }
 
+function onImageCellClick(index: number, e: MouseEvent): void {
+  // 选择模式下，点击图片单元格 = 切换整行选中，不开 Lightbox
+  if (props.selectionMode) {
+    e.stopPropagation(); // 让 .bubble-row @click 接管
+    emit('toggle-select', props.message.id);
+    return;
+  }
+  openLightbox(index);
+}
+
+function onRowClick(): void {
+  if (!props.selectionMode) return;
+  // pending 乐观消息不允许选中（id 以 pending- 开头）
+  if (props.message.id.startsWith('pending-')) return;
+  emit('toggle-select', props.message.id);
+}
+
 function resend(ref: LLMImageRefBlock): void {
   emit('resend-image', {
     cachePath: ref.cachePath,
@@ -169,6 +228,30 @@ function resend(ref: LLMImageRefBlock): void {
     fileName: ref.fileName,
   });
 }
+
+// ── hover 工具栏 ─────────────────────────────────────────
+
+const bubbleRef = ref<HTMLElement | null>(null);
+const markdownRef = ref<InstanceType<typeof MarkdownView> | null>(null);
+
+/** 工具栏可见性：选择态 / pending 乐观消息 → 隐藏 */
+const showToolbar = computed(() => {
+  if (props.selectionMode) return false;
+  if (props.message.id.startsWith('pending-')) return false;
+  return true;
+});
+
+/**
+ * 为剪贴板 text/html 分支提供 assistant 渲染后的 HTML；
+ * user 气泡传 null，让工具栏退化为 <p> 包裹纯文本。
+ */
+function htmlProvider(): string | null {
+  if (props.message.role !== 'assistant') return null;
+  // MarkdownView 内部容器 .markdown-body
+  const root = (markdownRef.value as unknown as { $el?: HTMLElement })?.$el;
+  if (!root) return null;
+  return root.innerHTML || null;
+}
 </script>
 
 <style scoped>
@@ -176,6 +259,9 @@ function resend(ref: LLMImageRefBlock): void {
   display: flex;
   width: 100%;
   margin: 6px 0;
+  padding: 4px 4px;
+  border-radius: 10px;
+  transition: background var(--transition);
 }
 
 .role-user {
@@ -186,12 +272,60 @@ function resend(ref: LLMImageRefBlock): void {
   justify-content: flex-start;
 }
 
-.bubble {
+/* ── 选择态 ─────────────────────────────────── */
+.bubble-row.selectable {
+  cursor: pointer;
+}
+.bubble-row.selectable:hover {
+  background: rgba(108, 92, 231, 0.06);
+}
+.bubble-row.selected {
+  background: rgba(108, 92, 231, 0.14);
+}
+
+/* checkbox 列 */
+.bubble-checkbox {
+  flex: 0 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.checkbox-box {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border-active, #555);
+  background: var(--bg-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition), border-color var(--transition);
+}
+.checkbox-box.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.checkbox-tick {
+  color: #fff;
+  font-size: 0.68rem;
+  line-height: 1;
+  font-weight: 700;
+}
+
+/* ── hover zone：包裹气泡 + 工具栏，保证 hover 连续 ─────── */
+.bubble-hover-zone {
+  position: relative;
+  display: inline-flex;
   max-width: min(760px, 88%);
+}
+
+.bubble {
   padding: 10px 14px;
   border-radius: 12px;
   line-height: 1.6;
   word-break: break-word;
+  flex: 1;
+  min-width: 0;
 }
 
 .role-user .bubble {
@@ -205,6 +339,11 @@ function resend(ref: LLMImageRefBlock): void {
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-top-left-radius: 4px;
+}
+
+/* 选中气泡：加一圈描边 */
+.bubble-row.selected .bubble {
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .bubble-user-text {
@@ -253,6 +392,9 @@ function resend(ref: LLMImageRefBlock): void {
   border-radius: 8px;
   overflow: hidden;
   line-height: 0;
+}
+.bubble-row.selectable .bubble-image-cell {
+  cursor: pointer;
 }
 
 .bubble-image {
@@ -304,5 +446,12 @@ function resend(ref: LLMImageRefBlock): void {
 }
 .bubble-image-resend:hover {
   background: rgba(0, 0, 0, 0.8);
+}
+
+/* ── hover 工具栏：进入 hover-zone 时显现 ───────── */
+.bubble-hover-zone:hover .bubble-toolbar-slot {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 </style>

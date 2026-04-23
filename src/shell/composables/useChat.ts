@@ -9,9 +9,13 @@
  * 订阅主进程 chat:event 事件流，在 stream-chunk 时累积 streamingText，
  * 在 stream-end 时把 assistant 消息 push 进 messages 并清空 buffer。
  *
+ * 另包含 V1.2 新增的"多选导出"状态：
+ * - selectionMode / selectedIds / selectedCount
+ * - enterSelection(preselectId?) / exitSelection / toggleSelect / selectAll / isSelected
+ *
  * 单例模式（整个 Shell 共享一份状态），避免多个 ChatView 实例造成冲突。
  */
-import { ref, computed, onUnmounted } from 'vue';
+import { ref, computed, watch, onUnmounted } from 'vue';
 import type {
   ChatEvent,
   ChatMessage,
@@ -27,6 +31,10 @@ const activeSession = ref<ChatSession | null>(null);
 const streamingText = ref<string>('');
 const currentRequestId = ref<string | null>(null);
 const lastError = ref<string | null>(null);
+
+// 选择态
+const selectionMode = ref<boolean>(false);
+const selectedIds = ref<Set<string>>(new Set());
 
 let eventDisposer: (() => void) | null = null;
 let initialized = false;
@@ -91,6 +99,20 @@ function ensureInitialized(): void {
   if (initialized) return;
   initialized = true;
   eventDisposer = window.electronAPI.onChatEvent(handleChatEvent);
+
+  // 会话切换 / 开始流式生成 时自动退出选择态
+  watch(
+    () => activeSession.value?.id ?? null,
+    (_next, prev) => {
+      if (prev !== undefined) exitSelection();
+    }
+  );
+  watch(
+    () => currentRequestId.value,
+    (reqId) => {
+      if (reqId && selectionMode.value) exitSelection();
+    }
+  );
 }
 
 // ─── API 方法 ─────────────────────────────────────────────
@@ -221,6 +243,53 @@ function dismissError(): void {
   lastError.value = null;
 }
 
+// ─── 选择态 API（V1.2 多选导出） ──────────────────────────
+
+/**
+ * 进入选择模式。
+ *
+ * @param preselectId  可选：触发进入的消息 id，自动预选中
+ *
+ * 进入条件（调用方应自行保证）：
+ *  - 存在 activeSession
+ *  - 非流式状态
+ */
+function enterSelection(preselectId?: string): void {
+  if (currentRequestId.value) return; // 流式中禁入
+  if (!activeSession.value) return;
+  selectionMode.value = true;
+  selectedIds.value = preselectId ? new Set([preselectId]) : new Set();
+}
+
+/** 退出选择模式并清空选中集合。 */
+function exitSelection(): void {
+  selectionMode.value = false;
+  selectedIds.value = new Set();
+}
+
+function isSelected(id: string): boolean {
+  return selectedIds.value.has(id);
+}
+
+function toggleSelect(id: string): void {
+  if (!selectionMode.value) return;
+  // Set 是响应式对象，需要克隆替换以触发视图更新
+  const next = new Set(selectedIds.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  selectedIds.value = next;
+}
+
+/** 全选当前会话的全部已落库消息（排除 pending 乐观消息） */
+function selectAll(): void {
+  if (!selectionMode.value || !activeSession.value) return;
+  const next = new Set<string>();
+  for (const m of activeSession.value.messages) {
+    if (!m.id.startsWith('pending-')) next.add(m.id);
+  }
+  selectedIds.value = next;
+}
+
 // ─── 导出 composable ──────────────────────────────────────
 
 export function useChat() {
@@ -240,6 +309,11 @@ export function useChat() {
     isStreaming: computed(() => currentRequestId.value !== null),
     lastError,
 
+    // selection state
+    selectionMode,
+    selectedIds,
+    selectedCount: computed(() => selectedIds.value.size),
+
     // actions
     refreshSessions,
     selectSession,
@@ -250,6 +324,13 @@ export function useChat() {
     sendMessage,
     abort,
     dismissError,
+
+    // selection actions
+    enterSelection,
+    exitSelection,
+    toggleSelect,
+    selectAll,
+    isSelected,
   };
 }
 
