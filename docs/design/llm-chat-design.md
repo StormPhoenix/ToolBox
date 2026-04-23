@@ -354,9 +354,14 @@ UI 层 `<img :src="toolbox-img://${hash}.${ext}">` 零 base64 内存占用，切
 | `Esc` | 退出选择模式 |
 | SelectionToolbar "取消" | 同上 |
 
-**hover 工具栏**通过 `.bubble-hover-zone` 包围盒触发，离开气泡但进入工具栏时仍保持可见；`position: absolute`，不占文档流高度，避免消息列表抖动。
+**hover 工具栏**不是独立 bubble，而是作为消息行下方的一段"隐形占位"融入背景：
 
-**流式气泡、错误条、乐观 pending 消息**均不参与选择，不显示 hover 工具栏。
+- 无背景 / 无边框 / 无阴影，纯线条图标；单个 icon hover 时仅通过颜色由 `--text-dim` 变为 `--text-primary` 反馈，**不加**圆形/方形底
+- 工具栏行始终占位 24px 高度（+ 4px 上边距），默认 `opacity: 0 + pointer-events: none`，不会引起布局抖动
+- hover 触发：**`.bubble-row:hover`** 时显现；hover 区域横跨 `MessageList` 内容区（920px max-width）左右两端，即气泡行 + 工具栏占位行的完整整行横条
+- user 气泡的工具栏右对齐贴气泡右下；assistant 气泡的工具栏左对齐贴气泡左下
+
+**流式气泡、错误条、乐观 pending 消息**均不渲染工具栏（也不占位）。
 
 ### 10.3 状态模型
 

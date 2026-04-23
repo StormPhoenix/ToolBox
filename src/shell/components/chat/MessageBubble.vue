@@ -18,51 +18,58 @@
       </span>
     </div>
 
-    <div class="bubble-hover-zone">
-      <div ref="bubbleRef" class="bubble">
-        <!-- 图片网格（仅 user 消息会有） -->
-        <div
-          v-if="imageItems.length > 0"
-          class="bubble-images"
-          :class="layoutClass"
-        >
+    <!--
+      row 内容：上半是气泡所在行（受 role 对齐影响），下半是工具栏占位行（整行横跨）。
+      两行一起构成 hover 触发区；hover 任一行都会显现工具栏。
+    -->
+    <div class="bubble-row-body">
+      <div class="bubble-line">
+        <div ref="bubbleRef" class="bubble">
+          <!-- 图片网格（仅 user 消息会有） -->
           <div
-            v-for="(item, i) in visibleImages"
-            :key="i"
-            class="bubble-image-cell"
-            @click="onImageCellClick(i, $event)"
+            v-if="imageItems.length > 0"
+            class="bubble-images"
+            :class="layoutClass"
           >
-            <img :src="item.src" class="bubble-image" alt="" draggable="false" />
-            <!-- 最后一格：超出 9 张显示 +N -->
-            <div v-if="i === 8 && overflow > 0" class="bubble-image-overflow">
-              +{{ overflow }}
-            </div>
-            <!-- 重新发送按钮（仅非选择态 + image_ref 有 cachePath 时才显示） -->
-            <button
-              v-if="item.ref && !selectionMode"
-              class="bubble-image-resend"
-              type="button"
-              title="重新发送此图"
-              @click.stop="resend(item.ref)"
+            <div
+              v-for="(item, i) in visibleImages"
+              :key="i"
+              class="bubble-image-cell"
+              @click="onImageCellClick(i, $event)"
             >
-              ⟳
-            </button>
+              <img :src="item.src" class="bubble-image" alt="" draggable="false" />
+              <!-- 最后一格：超出 9 张显示 +N -->
+              <div v-if="i === 8 && overflow > 0" class="bubble-image-overflow">
+                +{{ overflow }}
+              </div>
+              <!-- 重新发送按钮（仅非选择态 + image_ref 有 cachePath 时才显示） -->
+              <button
+                v-if="item.ref && !selectionMode"
+                class="bubble-image-resend"
+                type="button"
+                title="重新发送此图"
+                @click.stop="resend(item.ref)"
+              >
+                ⟳
+              </button>
+            </div>
           </div>
-        </div>
 
-        <!-- 文本内容：assistant 走 Markdown，user 走纯文本 -->
-        <MarkdownView
-          v-if="message.role === 'assistant'"
-          ref="markdownRef"
-          :text="textContent"
-        />
-        <div v-else-if="textContent" class="bubble-user-text">{{ textContent }}</div>
+          <!-- 文本内容：assistant 走 Markdown，user 走纯文本 -->
+          <MarkdownView
+            v-if="message.role === 'assistant'"
+            ref="markdownRef"
+            :text="textContent"
+          />
+          <div v-else-if="textContent" class="bubble-user-text">{{ textContent }}</div>
+        </div>
       </div>
 
-      <!-- hover 工具栏（选择态与流式气泡不显示；乐观 pending 消息也不显示） -->
+      <!-- 工具栏行：始终占位；选择模式 / pending / 流式未入库 → 永久透明 -->
       <BubbleToolbar
-        v-if="showToolbar"
+        v-if="showToolbarSlot"
         class="bubble-toolbar-slot"
+        :class="{ 'toolbar-locked': selectionMode }"
         :message="message"
         :role="message.role"
         :text-content="textContent"
@@ -234,9 +241,12 @@ function resend(ref: LLMImageRefBlock): void {
 const bubbleRef = ref<HTMLElement | null>(null);
 const markdownRef = ref<InstanceType<typeof MarkdownView> | null>(null);
 
-/** 工具栏可见性：选择态 / pending 乐观消息 → 隐藏 */
-const showToolbar = computed(() => {
-  if (props.selectionMode) return false;
+/**
+ * 工具栏插槽可见性：
+ *  - 只对已落库的正式消息渲染（pending 乐观消息不渲染、不占位）
+ *  - 选择模式下仍然渲染（占位保留），但透明且不可交互
+ */
+const showToolbarSlot = computed(() => {
   if (props.message.id.startsWith('pending-')) return false;
   return true;
 });
@@ -255,6 +265,19 @@ function htmlProvider(): string | null {
 </script>
 
 <style scoped>
+/**
+ * bubble-row：水平 flex 布局。
+ *  - 默认：checkbox 不存在，bubble-row-body 占满宽度
+ *  - 选择态：左侧 checkbox 列 28px + body 剩余宽度
+ *
+ * bubble-row-body：垂直 flex（气泡行 + 工具栏占位行）。
+ *  工具栏占位始终存在（除 pending 消息外），高度固定 28px（24+4 margin-top）。
+ *
+ * hover 触发：
+ *  - .bubble-row:hover → 子孙 .bubble-toolbar-slot 显现
+ *  - 整个 row（气泡行 + 工具栏行）都是 hover 区域，且 row 宽度横跨 MessageList
+ *    内容区（920px max-width），满足"整行横跨"语义
+ */
 .bubble-row {
   display: flex;
   width: 100%;
@@ -264,11 +287,23 @@ function htmlProvider(): string | null {
   transition: background var(--transition);
 }
 
-.role-user {
-  justify-content: flex-end;
+/* bubble-row-body 撑满剩余宽度，保证工具栏占位行能够左右对齐到两端 */
+.bubble-row-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
 }
 
-.role-assistant {
+/* 气泡行：根据 role 决定对齐 */
+.bubble-line {
+  display: flex;
+  width: 100%;
+}
+.role-user .bubble-line {
+  justify-content: flex-end;
+}
+.role-assistant .bubble-line {
   justify-content: flex-start;
 }
 
@@ -287,8 +322,9 @@ function htmlProvider(): string | null {
 .bubble-checkbox {
   flex: 0 0 28px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  padding-top: 12px; /* 与气泡文本基线大致对齐 */
 }
 .checkbox-box {
   width: 16px;
@@ -312,19 +348,14 @@ function htmlProvider(): string | null {
   font-weight: 700;
 }
 
-/* ── hover zone：包裹气泡 + 工具栏，保证 hover 连续 ─────── */
-.bubble-hover-zone {
-  position: relative;
-  display: inline-flex;
-  max-width: min(760px, 88%);
-}
+/* ── 气泡本身 ─────────────────────────────────── */
 
 .bubble {
+  max-width: min(760px, 88%);
   padding: 10px 14px;
   border-radius: 12px;
   line-height: 1.6;
   word-break: break-word;
-  flex: 1;
   min-width: 0;
 }
 
@@ -448,10 +479,13 @@ function htmlProvider(): string | null {
   background: rgba(0, 0, 0, 0.8);
 }
 
-/* ── hover 工具栏：进入 hover-zone 时显现 ───────── */
-.bubble-hover-zone:hover .bubble-toolbar-slot {
+/* ── hover 工具栏显现规则 ─────────────────────────
+ *
+ * 1) 非选择模式：.bubble-row:hover 时工具栏 opacity → 1
+ * 2) 选择模式：工具栏永久透明不可交互（toolbar-locked 标记）
+ */
+.bubble-row:hover .bubble-toolbar-slot:not(.toolbar-locked) {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
 }
 </style>

@@ -41,12 +41,16 @@
 /**
  * BubbleToolbar — 消息气泡下方的 hover 工具栏
  *
- * 内含两个图标按钮：
- *  - 复制：把该条消息内容写入剪贴板（text/plain + text/html 双份）；成功后
- *    图标切换为 ✓ 持续 1s 后复原
- *  - 多选：通知上层进入选择模式并预选中这一条
+ * 视觉规范（V1.2 调整，融入背景）：
+ *  - 无背景 / 无边框 / 无阴影，纯线条图标直接贴在消息列表背景上
+ *  - 默认 opacity 0 且 pointer-events: none，保留高度占位（不抖动）
+ *  - 外层 .bubble-row:hover 时显现（hover 触发由父组件控制，非本组件）
+ *  - icon 仅通过颜色变化反馈 hover（无圆形/方形 hover 底）
  *
- * 工具栏布局采用绝对定位，由父级 bubble-row 的 hover 区域控制显示。
+ * 内含两个按钮：
+ *  - 复制：把该条消息内容写入剪贴板（text/plain + text/html 双份）；
+ *    成功后图标切换为 ✓（绿色）持续 1s 后复原
+ *  - 多选：通知上层进入选择模式并预选中这一条
  */
 import { ref } from 'vue';
 import type { ChatMessage } from '@toolbox/bridge';
@@ -81,7 +85,7 @@ function escapeHtml(s: string): string {
 /**
  * 收集消息中的图片 markdown 占位（附在文本末尾）。
  * image_ref → ![name](toolbox-img://hash.ext)
- * image(base64) → ![image](…base64 省略…)  —— 此处改为简单占位
+ * image(base64) → ![图片](pasted)
  */
 function collectImagePlaceholders(msg: ChatMessage): string[] {
   if (typeof msg.content === 'string') return [];
@@ -151,7 +155,6 @@ async function onCopy(): Promise<void> {
     }, 1000);
   } catch (err) {
     console.error('[BubbleToolbar] copy failed:', err);
-    // 兜底：尝试纯文本再试一次
     try {
       await navigator.clipboard.writeText(plainText);
       copied.value = true;
@@ -167,47 +170,45 @@ async function onCopy(): Promise<void> {
 </script>
 
 <style scoped>
+/**
+ * 工具栏行：普通 flow 元素，始终占位 24px 高度 + 4px 上边距。
+ * 默认透明且不可交互；由父级 .bubble-row:hover 控制显现。
+ */
 .bubble-toolbar {
-  position: absolute;
-  bottom: -26px;
   display: flex;
+  align-items: center;
   gap: 2px;
-  padding: 2px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  width: 100%;
+  height: 24px;
+  margin-top: 4px;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(-4px);
-  transition: opacity 0.14s ease, transform 0.14s ease;
-  z-index: 2;
+  transition: opacity 0.12s ease-out;
 }
 
 /* user 气泡右对齐 → 工具栏右对齐；assistant 气泡左对齐 → 工具栏左对齐 */
 .role-user {
-  right: 0;
+  justify-content: flex-end;
 }
 .role-assistant {
-  left: 0;
+  justify-content: flex-start;
 }
 
 .bubble-toolbar-btn {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border: none;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-dim);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 0; /* 不加 hover 底，不需要圆角 */
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background var(--transition), color var(--transition);
+  transition: color 0.1s linear;
 }
 .bubble-toolbar-btn:hover {
-  background: var(--bg-card-hover);
   color: var(--text-primary);
 }
 
