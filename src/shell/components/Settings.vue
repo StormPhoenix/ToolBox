@@ -113,6 +113,13 @@
           >
             {{ testing ? '测试中…' : '测试连接' }}
           </button>
+          <button
+            class="btn btn--secondary"
+            :disabled="testingImageGen || !canTest"
+            @click="handleTestImageGen"
+          >
+            {{ testingImageGen ? '测试中…' : '测试图像生成' }}
+          </button>
         </div>
 
         <!-- 测试结果 -->
@@ -120,6 +127,14 @@
           <div v-if="testResult" class="test-result" :class="testResult.ok ? 'ok' : 'fail'">
             <span class="test-icon">{{ testResult.ok ? '✓' : '✕' }}</span>
             <span>{{ testResult.ok ? '连接成功，API Key 有效' : testResult.error }}</span>
+          </div>
+        </Transition>
+
+        <!-- 图像生成测试结果 -->
+        <Transition name="fade">
+          <div v-if="imageGenResult" class="test-result" :class="imageGenResult.ok ? 'ok' : 'fail'">
+            <span class="test-icon">{{ imageGenResult.ok ? '✓' : '✕' }}</span>
+            <span>{{ imageGenResult.message }}</span>
           </div>
         </Transition>
 
@@ -192,6 +207,8 @@ const saving = ref(false);
 const saveSuccess = ref(false);
 const testing = ref(false);
 const testResult = ref<{ ok: boolean; error?: string } | null>(null);
+const testingImageGen = ref(false);
+const imageGenResult = ref<{ ok: boolean; message: string } | null>(null);
 
 /**
  * 各 provider 是否已有持久化的 apiKey。
@@ -226,6 +243,7 @@ const canTest = computed(() => {
 // provider 切换时重置测试结果
 watch(() => form.provider, () => {
   testResult.value = null;
+  imageGenResult.value = null;
   showKey.value = false;
 });
 
@@ -302,9 +320,8 @@ async function handleSave(): Promise<void> {
 async function handleTest(): Promise<void> {
   testing.value = true;
   testResult.value = null;
+  imageGenResult.value = null;
   try {
-    // 仅当表单有未保存的修改时才先写一次配置；
-    // 否则直接使用后端已持久化的配置进行测试。
     if (hasUnsavedChanges()) {
       await handleSave();
     }
@@ -312,6 +329,29 @@ async function handleTest(): Promise<void> {
     testResult.value = result;
   } finally {
     testing.value = false;
+  }
+}
+
+async function handleTestImageGen(): Promise<void> {
+  testingImageGen.value = true;
+  imageGenResult.value = null;
+  testResult.value = null;
+  try {
+    if (hasUnsavedChanges()) {
+      await handleSave();
+    }
+    await window.electronAPI.llmGenerateImage({
+      prompt: 'A small red circle on a white background',
+      size: '1024x1024',
+      quality: 'standard',
+      n: 1,
+    });
+    imageGenResult.value = { ok: true, message: '图像生成成功，当前 Provider 支持图像生成能力' };
+  } catch (err) {
+    const msg = (err as Error).message || '未知错误';
+    imageGenResult.value = { ok: false, message: msg };
+  } finally {
+    testingImageGen.value = false;
   }
 }
 
