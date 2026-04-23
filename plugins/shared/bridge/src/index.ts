@@ -36,6 +36,14 @@ export type {
 export { createLogger } from './logger';
 export type { Logger } from './logger';
 
+// ── LLM 辅助工具 ──────────────────────────────────────────────────────────
+export {
+  inferImageMediaType,
+  buildImageMessage,
+  buildMultiImageMessage,
+} from './llm-helpers';
+export type { ImageMediaType } from './llm-helpers';
+
 // ── electronAPI 直连 webview 内注入的 window.electronAPI ──────────────────
 
 /**
