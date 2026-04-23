@@ -37,6 +37,11 @@ ToolBox/
 │   │   │       ├── claude.ts         # ClaudeProvider（@anthropic-ai/sdk）
 │   │   │       ├── openai.ts         # OpenAIProvider（openai SDK，兼容第三方）
 │   │   │       └── gemini.ts         # GeminiProvider（@google/genai）
+│   │   ├── chat/                     # LLM Chat 对话引擎（主进程侧）
+│   │   │   ├── types.ts              # ChatMessage / ChatSession / ChatEvent
+│   │   │   ├── session-store.ts      # 会话持久化（userData/chat-sessions/）
+│   │   │   ├── chat-engine.ts        # 抢占式流式引擎 + 错误分类
+│   │   │   └── chat-ipc.ts           # IPC handlers + 事件广播
 │   │   └── image-resize/             # 图像分辨率调整框架（主进程侧，sharp + exifr）
 │   │       ├── types.ts              # ResizeProvider 接口、Options、Response 等
 │   │       ├── router.ts             # ResizeRouter — 算法路由 + 错误统一
@@ -56,15 +61,27 @@ ToolBox/
 │   └── shell/                        # Shell 主界面（Vue 3 + Vite）
 │       ├── index.html                # Vite 入口 HTML
 │       ├── main.ts                   # Vue 应用挂载入口
-│       ├── App.vue                   # 根组件（侧边栏 + 内容区布局）
+│       ├── App.vue                   # 根组件（侧边栏 + 内容区布局，路由 chat/settings/tools）
 │       ├── components/
-│       │   ├── Sidebar.vue           # 左侧分类导航栏（支持折叠，底部含设置入口）
+│       │   ├── Sidebar.vue           # 左侧分类导航栏（支持折叠，底部含 AI 对话 + 设置入口）
 │       │   ├── PluginCard.vue        # 单个工具卡片
 │       │   ├── ToolGrid.vue          # 工具网格列表
 │       │   ├── ToolViewer.vue        # webview 插件查看器
-│       │   └── Settings.vue          # 设置页（LLM Provider / API Key / Model 配置）
+│       │   ├── Settings.vue          # 设置页（LLM Provider / API Key / Model 配置）
+│       │   └── chat/                 # LLM Chat 对话 UI（V1 纯对话）
+│       │       ├── ChatView.vue      # 两栏容器 + 空态 / 未配置态
+│       │       ├── SessionList.vue   # 左栏：会话列表（新建/选中/重命名/删除）
+│       │       ├── ChatHeader.vue    # 顶部：标题 + 模型徽章 + 清空/设置
+│       │       ├── MessageList.vue   # 消息滚动区（自动滚底 + 跳到底部按钮）
+│       │       ├── MessageBubble.vue # 单条消息气泡（user/assistant）
+│       │       ├── StreamingBubble.vue # 正在生成中气泡（打字指示器）
+│       │       ├── Composer.vue      # 输入框 + 附件 + 发送/停止
+│       │       └── MarkdownView.vue  # markdown-it + highlight.js 渲染
 │       ├── composables/
-│       │   └── usePlugins.ts         # 插件注册表状态管理 composable
+│       │   ├── usePlugins.ts         # 插件注册表状态管理 composable
+│       │   └── useChat.ts            # Chat 状态 + IPC + chat:event 订阅（单例）
+│       ├── utils/
+│       │   └── markdown.ts           # Markdown 渲染工具（含代码复制按钮）
 │       ├── data/
 │       │   └── categories.ts         # 工具分类数据定义
 │       ├── types/
@@ -207,6 +224,15 @@ plugins/
 | `parseImageMetadata(filePath)` | `image-resize:parse-metadata` | 解析图片基本信息 + EXIF（sharp + exifr），同时生成 256px 略缩图，分配 `sessionId` |
 | `resizeImage(inputPath, options, sessionId)` | `image-resize:process` | 按 `ResizeOptions` 处理图片，结果写入临时文件，返回 `ResizeResponse` |
 | `saveResizedImage(tempPath, targetPath)` | `image-resize:save-as` | 将处理后的临时文件另存为到用户指定路径 |
+| `chatListSessions()` | `chat:list-sessions` | 列出所有 Chat 会话（轻量索引） |
+| `chatLoadSession(id)` | `chat:load-session` | 加载单个会话完整数据，不存在返回 null |
+| `chatCreateSession(title?)` | `chat:create-session` | 创建空会话 |
+| `chatDeleteSession(id)` | `chat:delete-session` | 删除会话 |
+| `chatRenameSession(id, title)` | `chat:rename-session` | 重命名会话 |
+| `chatClearContext(id)` | `chat:clear-context` | 清空会话消息（保留会话） |
+| `chatSend(input)` | `chat:send` | 发送用户消息；立即返回 `{ requestId, userMessageId }`，真实回复通过 `chat:event` 事件流推送 |
+| `chatAbort(requestId)` | `chat:abort` | 中止指定进行中的请求 |
+| `onChatEvent(cb)` | `chat:event`（push） | 订阅 Chat 事件流（`stream-chunk` / `stream-end` / `error` / `aborted`），返回 dispose 函数 |
 
 **新增 IPC 通道三步骤：**
 1. `src/main/main.ts` — `ipcMain.handle('channel', handler)`
@@ -380,6 +406,7 @@ const msg = buildMultiImageMessage(
 | `docs/plugin-bridge.md` | 技术 | `@toolbox/bridge` 与 webview 插件 API 访问说明 |
 | `docs/design/file-rename-plugin-design.md` | 需求/设计 | 批量重命名插件功能规格、UI 设计、IPC 扩展方案 |
 | `docs/design/image-resize-plugin-design.md` | 需求/设计 | 图像分辨率调整插件功能规格、Resize Provider 架构、IPC 扩展方案 |
+| `docs/design/llm-chat-design.md` | 需求/设计 | LLM Chat 对话功能（V1 纯对话）：引擎架构、IPC、UI 布局 |
 | `docs/tech/llm-framework.md` | 技术 | LLM 框架架构、Provider 配置、插件调用指南 |
 
 > 新增文档后请在此表登记。

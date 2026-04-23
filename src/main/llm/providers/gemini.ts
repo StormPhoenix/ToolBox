@@ -65,6 +65,68 @@ export class GeminiProvider implements LLMProvider {
     return toUnifiedResponse(response);
   }
 
+  /**
+   * 流式对话。
+   *
+   * 使用 @google/genai 的 generateContentStream，返回异步迭代器；
+   * 每个 chunk 通过 `chunk.text` 访问本次的增量文本（SDK 自动累积并返回最新 delta 之前全部，
+   * 但本 SDK 在流式场景下 chunk.text 表示"本 chunk 的增量"），usage 在最后一个 chunk 才有。
+   *
+   * AbortSignal 支持：Gemini SDK 的 RequestOptions 允许传 abortSignal。
+   */
+  async streamMessage(
+    system: LLMSystemParam,
+    messages: LLMMessageParam[],
+    onText: (delta: string) => void,
+    signal?: AbortSignal
+  ): Promise<LLMResponse> {
+    const contents = toGeminiContents(messages);
+    const systemStr = flattenSystem(system);
+
+    const iter = await this.ai.models.generateContentStream({
+      model: this.model,
+      contents,
+      config: {
+        systemInstruction: systemStr || undefined,
+        maxOutputTokens: this.maxTokens,
+        ...(signal && { abortSignal: signal }),
+      },
+    });
+
+    let fullText = '';
+    let usage:
+      | { input_tokens: number; output_tokens: number }
+      | undefined;
+
+    for await (const chunk of iter) {
+      if (signal?.aborted) {
+        // 主动中止：SDK 会抛 AbortError，但保险起见在迭代点也 break
+        throw new Error('AbortError');
+      }
+      const delta = typeof chunk.text === 'string' ? chunk.text : undefined;
+      if (delta) {
+        fullText += delta;
+        onText(delta);
+      }
+      if (chunk.usageMetadata) {
+        usage = {
+          input_tokens: chunk.usageMetadata.promptTokenCount ?? 0,
+          output_tokens: chunk.usageMetadata.candidatesTokenCount ?? 0,
+        };
+      }
+    }
+
+    log.info(
+      `streamMessage 完成: text=${fullText.length} chars, model=${this.model}`
+    );
+
+    return {
+      content: fullText ? [{ type: 'text', text: fullText }] : [],
+      stop_reason: 'end_turn',
+      usage,
+    };
+  }
+
   get capabilities() {
     return {
       toolUse: true,

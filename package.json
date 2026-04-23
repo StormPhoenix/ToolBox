@@ -23,6 +23,7 @@
   "license": "MIT",
   "devDependencies": {
     "@toolbox/bridge": "workspace:*",
+    "@types/markdown-it": "^14.1.2",
     "@types/node": "^20.11.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "concurrently": "^9.1.0",
@@ -36,6 +37,8 @@
     "@anthropic-ai/sdk": "^0.90.0",
     "@google/genai": "^1.50.1",
     "exifr": "^7.1.3",
+    "highlight.js": "^11.11.1",
+    "markdown-it": "^14.1.1",
     "openai": "^6.34.0",
     "sharp": "^0.34.5"
   }

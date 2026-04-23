@@ -76,4 +76,39 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   saveResizedImage: (tempPath: string, targetPath: string) =>
     ipcRenderer.invoke('image-resize:save-as', tempPath, targetPath),
+
+  // ── Chat（V1 纯对话，仅 Shell 使用，插件侧不可见） ─────
+  chatListSessions: () =>
+    ipcRenderer.invoke('chat:list-sessions'),
+
+  chatLoadSession: (id: string) =>
+    ipcRenderer.invoke('chat:load-session', id),
+
+  chatCreateSession: (title?: string) =>
+    ipcRenderer.invoke('chat:create-session', title),
+
+  chatDeleteSession: (id: string) =>
+    ipcRenderer.invoke('chat:delete-session', id),
+
+  chatRenameSession: (id: string, title: string) =>
+    ipcRenderer.invoke('chat:rename-session', id, title),
+
+  chatClearContext: (id: string) =>
+    ipcRenderer.invoke('chat:clear-context', id),
+
+  chatSend: (input: unknown) =>
+    ipcRenderer.invoke('chat:send', input),
+
+  chatAbort: (requestId: string) =>
+    ipcRenderer.invoke('chat:abort', requestId),
+
+  /**
+   * 订阅 chat 事件流，返回一个 dispose 函数用于取消订阅。
+   * 主进程通过 webContents.send('chat:event', event) 推送事件。
+   */
+  onChatEvent: (callback: (event: unknown) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, event: unknown) => callback(event);
+    ipcRenderer.on('chat:event', listener);
+    return () => ipcRenderer.removeListener('chat:event', listener);
+  },
 });

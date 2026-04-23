@@ -115,6 +115,14 @@ async function getRouter(): Promise<LLMRouter> {
   return router;
 }
 
+/**
+ * 供其他模块（如 ChatEngine）共享同一个 LLMRouter 实例。
+ * 保证 Settings 中更新配置后，所有消费者立即用上新 Provider。
+ */
+export async function getSharedLLMRouter(): Promise<LLMRouter> {
+  return getRouter();
+}
+
 // ─── IPC 注册 ──────────────────────────────────────────────
 
 export function registerLLMHandlers(): void {

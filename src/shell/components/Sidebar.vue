@@ -21,8 +21,17 @@
       </button>
     </nav>
 
-    <!-- 底部：设置 -->
+    <!-- 底部：AI 对话 + 设置 -->
     <div class="sidebar-footer">
+      <button
+        class="nav-item"
+        :class="{ active: modelValue === 'chat' }"
+        @click="$emit('update:modelValue', 'chat')"
+        :title="collapsed ? 'AI 对话' : undefined"
+      >
+        <span class="nav-icon">💬</span>
+        <span class="nav-label" v-show="!collapsed">AI 对话</span>
+      </button>
       <button
         class="nav-item"
         :class="{ active: modelValue === 'settings' }"
@@ -110,6 +119,9 @@ const collapsed = ref(false);
 .sidebar-footer {
   padding: 8px;
   border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .nav-item {

@@ -160,6 +160,24 @@ export interface LLMProvider {
   ): Promise<LLMResponse>;
 
   /**
+   * 流式文本生成（纯对话，不含 tools）。
+   *
+   * 每收到一段增量文本会调用 onText(delta)；
+   * 完成后返回完整的 LLMResponse（含汇总 text + usage）。
+   *
+   * 设计说明：
+   * - V1 只用于 ChatEngine 纯对话场景，因此不接受 tools / toolChoice 参数。
+   *   未来如需工具 Agent，再单独扩展或新增 streamAgentMessage。
+   * - 传入的 AbortSignal 用于用户中止；中止时应抛出 AbortError。
+   */
+  streamMessage(
+    system: LLMSystemParam,
+    messages: LLMMessageParam[],
+    onText: (delta: string) => void,
+    signal?: AbortSignal
+  ): Promise<LLMResponse>;
+
+  /**
    * 图像生成（可选）。
    * 不支持此能力的 Provider 不实现此方法，
    * 调用方需先检查 capabilities.imageGeneration。

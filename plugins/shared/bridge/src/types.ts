@@ -330,6 +330,76 @@ export interface SaveResizedResult {
   error?: string;
 }
 
+// ── Chat 类型（Shell 内置对话功能） ───────────────────────────────────────
+
+/**
+ * Chat 消息内容块（持久化用）。
+ * 复用 LLM 消息内容结构，含 text 与 image。
+ */
+export type ChatMessageContent = LLMMessageContent;
+
+/** 持久化的单条消息 */
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: ChatMessageContent;
+  timestamp: number;
+  attachments?: Array<{ name: string; mediaType: string }>;
+  model?: { provider: LLMProviderType; model: string };
+}
+
+/** 完整会话 */
+export interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  systemPrompt?: string;
+  messages: ChatMessage[];
+}
+
+/** 会话列表项（轻量索引） */
+export interface SessionIndexEntry {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messageCount: number;
+}
+
+/** 发送时的用户附件 */
+export interface ChatAttachmentInput {
+  name: string;
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  /** base64（不含 data URL 前缀） */
+  base64: string;
+}
+
+/** chat:send 入参 */
+export interface ChatSendInput {
+  sessionId: string;
+  userText: string;
+  attachments?: ChatAttachmentInput[];
+}
+
+/** chat:send 出参 */
+export interface ChatSendResult {
+  requestId: string;
+  userMessageId: string;
+}
+
+/** Chat 事件（主进程推送给渲染进程） */
+export type ChatEvent =
+  | { kind: 'stream-chunk'; requestId: string; text: string }
+  | {
+      kind: 'stream-end';
+      requestId: string;
+      text: string;
+      assistantMessageId: string;
+      usage?: { input_tokens: number; output_tokens: number };
+    }
+  | { kind: 'error'; requestId: string; message: string; recoverable: boolean }
+  | { kind: 'aborted'; requestId: string };
+
 // ── ElectronAPI 主接口 ────────────────────────────────────────────────────
 
 export interface ElectronAPI {
@@ -474,4 +544,44 @@ export interface ElectronAPI {
    * 临时文件不删除，保留到窗口关闭。
    */
   saveResizedImage(tempPath: string, targetPath: string): Promise<SaveResizedResult>;
+
+  // ── Chat（Shell 内置对话，插件一般不使用） ────────────────────────────
+
+  /** 列出所有会话（轻量索引，不含 messages） */
+  chatListSessions(): Promise<SessionIndexEntry[]>;
+
+  /** 加载单个会话完整数据，不存在返回 null */
+  chatLoadSession(id: string): Promise<ChatSession | null>;
+
+  /** 创建空会话 */
+  chatCreateSession(title?: string): Promise<ChatSession>;
+
+  /** 删除会话 */
+  chatDeleteSession(id: string): Promise<void>;
+
+  /** 重命名会话 */
+  chatRenameSession(id: string, title: string): Promise<void>;
+
+  /** 清空会话消息（保留会话本身） */
+  chatClearContext(id: string): Promise<void>;
+
+  /**
+   * 发送用户消息，异步流式回复。
+   *
+   * 调用方需在调用前通过 onChatEvent 订阅事件：
+   *   - 'stream-chunk'：每次收到增量文本
+   *   - 'stream-end':  本次回复结束，含 assistantMessageId
+   *   - 'error':       出错
+   *   - 'aborted':     用户中止
+   */
+  chatSend(input: ChatSendInput): Promise<ChatSendResult>;
+
+  /** 中止指定 requestId 对应的进行中请求 */
+  chatAbort(requestId: string): Promise<void>;
+
+  /**
+   * 订阅 Chat 事件流。
+   * 返回 dispose 函数，调用即可取消订阅。
+   */
+  onChatEvent(callback: (event: ChatEvent) => void): () => void;
 }

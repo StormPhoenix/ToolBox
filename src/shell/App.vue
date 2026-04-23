@@ -8,8 +8,14 @@
 
     <!-- 主内容区 -->
     <main class="app-content">
+      <!-- AI 对话 -->
+      <ChatView
+        v-if="activeCategoryId === 'chat'"
+        @open-settings="activeCategoryId = 'settings'"
+      />
+
       <!-- 设置页 -->
-      <Settings v-if="activeCategoryId === 'settings'" />
+      <Settings v-else-if="activeCategoryId === 'settings'" />
 
       <!-- 查看插件详情 -->
       <ToolViewer
@@ -36,6 +42,7 @@ import Sidebar from './components/Sidebar.vue';
 import ToolGrid from './components/ToolGrid.vue';
 import ToolViewer from './components/ToolViewer.vue';
 import Settings from './components/Settings.vue';
+import ChatView from './components/chat/ChatView.vue';
 import { usePlugins } from './composables/usePlugins';
 import { CATEGORIES } from './data/categories';
 

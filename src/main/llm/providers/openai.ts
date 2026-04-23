@@ -66,6 +66,76 @@ export class OpenAIProvider implements LLMProvider {
     return toUnifiedResponse(resp);
   }
 
+  /**
+   * 流式对话。
+   *
+   * 迭代 chat.completions 的 SSE chunk 流：
+   *   - choices[0].delta.content 为本次增量文本，调用 onText
+   *   - choices[0].finish_reason 在最后一个 chunk 出现
+   *   - usage 需配置 stream_options.include_usage 才会在末尾 chunk 出现
+   *
+   * AbortSignal 直接透传给 SDK（OpenAI SDK 支持 signal 参数）。
+   */
+  async streamMessage(
+    system: LLMSystemParam,
+    messages: LLMMessageParam[],
+    onText: (delta: string) => void,
+    signal?: AbortSignal
+  ): Promise<LLMResponse> {
+    const openaiMessages = toOpenAIMessages(flattenSystem(system), messages);
+
+    const stream = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        max_completion_tokens: this.maxTokens,
+        messages: openaiMessages,
+        stream: true,
+        stream_options: { include_usage: true },
+      },
+      { signal }
+    );
+
+    let fullText = '';
+    let finishReason: string | null = null;
+    let usage: { input_tokens: number; output_tokens: number } | undefined;
+
+    for await (const chunk of stream) {
+      const choice = chunk.choices[0];
+      if (choice) {
+        const delta = choice.delta?.content;
+        if (delta) {
+          fullText += delta;
+          onText(delta);
+        }
+        if (choice.finish_reason) {
+          finishReason = choice.finish_reason;
+        }
+      }
+      // 末尾 chunk 带 usage（choices 通常为空数组）
+      if (chunk.usage) {
+        usage = {
+          input_tokens: chunk.usage.prompt_tokens,
+          output_tokens: chunk.usage.completion_tokens ?? 0,
+        };
+      }
+    }
+
+    let stopReason: LLMResponse['stop_reason'] = 'end_turn';
+    if (finishReason === 'tool_calls') stopReason = 'tool_use';
+    else if (finishReason === 'length') stopReason = 'max_tokens';
+
+    log.info(
+      `streamMessage 完成: finish_reason=${finishReason}, ` +
+        `text=${fullText.length} chars, model=${this.model}`
+    );
+
+    return {
+      content: fullText ? [{ type: 'text', text: fullText }] : [],
+      stop_reason: stopReason,
+      usage,
+    };
+  }
+
   get capabilities() {
     return {
       toolUse: true,

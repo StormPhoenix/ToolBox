@@ -63,6 +63,77 @@ export class ClaudeProvider implements LLMProvider {
     return toUnifiedResponse(resp);
   }
 
+  /**
+   * 流式对话。
+   *
+   * 使用 SDK 提供的 MessageStream（封装了 SSE 解析）：
+   *   - 'text' 事件：每次收到 text delta
+   *   - 'error' 事件：流中出错（包括 "request ended without sending any chunks"）
+   *   - finalMessage()：等待流结束并返回完整 Message
+   *
+   * 为了与 AbortSignal 整合：收到 abort 信号时调用 stream.abort()。
+   * 流式异常时回退到非流式 createMessage（兼容某些代理不支持 SSE 的情况）。
+   */
+  async streamMessage(
+    system: LLMSystemParam,
+    messages: LLMMessageParam[],
+    onText: (delta: string) => void,
+    signal?: AbortSignal
+  ): Promise<LLMResponse> {
+    try {
+      const stream = this.client.messages.stream({
+        model: this.model,
+        max_tokens: this.maxTokens,
+        system: toAnthropicSystem(system),
+        messages: messages as MessageParam[],
+      });
+
+      // AbortSignal → stream.abort()
+      const onAbort = () => {
+        try {
+          stream.abort();
+        } catch {
+          /* noop */
+        }
+      };
+      if (signal) {
+        if (signal.aborted) onAbort();
+        else signal.addEventListener('abort', onAbort, { once: true });
+      }
+
+      stream.on('text', (delta: string) => {
+        if (delta) onText(delta);
+      });
+
+      const finalMessage = await stream.finalMessage();
+      signal?.removeEventListener('abort', onAbort);
+
+      log.info(
+        `streamMessage 完成: stop_reason=${finalMessage.stop_reason}, model=${this.model}`
+      );
+      return toUnifiedResponse(finalMessage);
+    } catch (err) {
+      const msg = (err as Error).message || '';
+      // 用户主动中止：直接重抛，由上层 ChatEngine 区分处理
+      if (signal?.aborted || /abort/i.test(msg)) {
+        throw err;
+      }
+      // 某些代理不支持 SSE，会报 "request ended without sending any chunks"，
+      // 此时回退到非流式 createMessage，保证功能可用。
+      if (/without sending any chunks/i.test(msg)) {
+        log.warn(`streamMessage SSE 失败，回退非流式: ${msg}`);
+        const resp = await this.createMessage(system, messages);
+        const text = resp.content
+          .filter((b): b is LLMTextBlock => b.type === 'text')
+          .map((b) => b.text)
+          .join('');
+        if (text) onText(text);
+        return resp;
+      }
+      throw err;
+    }
+  }
+
   get capabilities() {
     return {
       toolUse: true,

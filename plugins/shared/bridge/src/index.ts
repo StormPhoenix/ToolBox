@@ -45,6 +45,15 @@ export type {
   ResizeFailure,
   ResizeResponse,
   SaveResizedResult,
+  // Chat 类型
+  ChatMessageContent,
+  ChatMessage,
+  ChatSession,
+  SessionIndexEntry,
+  ChatAttachmentInput,
+  ChatSendInput,
+  ChatSendResult,
+  ChatEvent,
 } from './types';
 
 export { createLogger } from './logger';
