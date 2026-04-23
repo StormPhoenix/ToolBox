@@ -9,10 +9,11 @@
  * 5. 支持 abort 抢占：同 sessionId 新请求先 abort 旧请求
  * 6. 错误恢复：context_length 错误时从最后一条 user 消息中剥离图片引用
  *
- * K=3 历史淡出规则：
- * - 从消息数组尾部往前扫，最近 3 条"含图消息"的 image_ref 还原为 LLMImageBlock
- * - 更早的 image_ref 降级为文本占位：`[图片: <fileName>（已超出本轮上下文）]`
+ * K=1 历史淡出规则：
+ * - 从消息数组尾部往前扫，最近 1 条"含图消息"的 image_ref 还原为 LLMImageBlock
+ * - 更早的 image_ref 降级为文本占位：`[历史图片: <fileName>]`
  * - 一条消息里的多张图作为一个整体（要么全还原、要么全降级）
+ * - 目的是避免多图同时送进 LLM 导致视觉注意力串扰（详见 IMAGE_HISTORY_K 常量说明）
  */
 import { randomUUID } from 'crypto';
 import type {
@@ -40,8 +41,19 @@ const log = createLogger('ChatEngine');
 
 /** 周期性 stall 日志：长时间无响应时提示 */
 const STALL_WARN_INTERVAL_MS = 15_000;
-/** 最近 K 条含图消息保留 base64，更早降级为占位文本 */
-const IMAGE_HISTORY_K = 3;
+/**
+ * 最近 K 条含图消息保留 base64，更早降级为占位文本。
+ *
+ * 设定为 1 的理由：
+ * - 多张图同时送给 LLM 会导致视觉注意力串扰（cross-image attention leakage），
+ *   模型容易把最新问题回答成历史图片的内容
+ * - 工具箱 AI 助手以"逐图问答"为主，"多图对比"场景占比低
+ * - 保持 K=1 让最后一条 user 消息只含本次上传的图，LLM 定位明确
+ *
+ * 若日后需要支持多图对比，建议引入"钉住参考图"机制（给 imageRef 加 pinned 标记），
+ * 而不是盲目放大 K。
+ */
+const IMAGE_HISTORY_K = 1;
 
 function startStallWarning(phase: string, requestId: string): () => void {
   let elapsed = 0;
@@ -197,13 +209,13 @@ async function prepareLLMMessages(
             // 文件丢失 → 降级
             outBlocks.push({
               type: 'text',
-              text: `[图片: ${b.fileName}（文件已丢失）]`,
+              text: `[历史图片: ${b.fileName}（缓存已丢失）]`,
             });
           }
         } else {
           outBlocks.push({
             type: 'text',
-            text: `[图片: ${b.fileName}（已超出本轮上下文）]`,
+            text: `[历史图片: ${b.fileName}]`,
           });
         }
       } else if (b.type === 'image') {
@@ -282,7 +294,7 @@ async function stripLastUserImages(sessionId: string): Promise<boolean> {
       if (isImageRef(b)) {
         return {
           type: 'text',
-          text: `[图片: ${b.fileName}（因上下文超限已移除）]`,
+          text: `[历史图片: ${b.fileName}（因上下文超限已移除）]`,
         } satisfies LLMTextBlock;
       }
       return b;

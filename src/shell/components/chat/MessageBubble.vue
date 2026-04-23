@@ -221,11 +221,14 @@ function resend(ref: LLMImageRefBlock): void {
 }
 
 .layout-1 {
-  grid-template-columns: 240px;
+  /* 让网格单元格宽度跟随图片实际渲染宽度，避免竖图时 cell 留出空白（露出深色背景） */
+  grid-template-columns: max-content;
 }
 .layout-1 .bubble-image {
   max-width: 240px;
-  max-height: 180px;
+  max-height: 240px;
+  width: auto;
+  height: auto;
 }
 
 .layout-2 {
@@ -249,7 +252,6 @@ function resend(ref: LLMImageRefBlock): void {
   cursor: zoom-in;
   border-radius: 8px;
   overflow: hidden;
-  background: var(--bg-base);
   line-height: 0;
 }
 

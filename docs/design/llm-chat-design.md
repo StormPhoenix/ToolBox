@@ -213,8 +213,8 @@ V1 把图片 base64 直接塞进会话 JSON，随消息一起送入 LLM。问题
                    │ 发送到 LLM 前：
                    ▼
 ┌────────────── prepareLLMMessages ─────────┐
-│  最近 K=3 条含图消息的 imageRef → base64   │
-│  更早的 imageRef → 文本 "[图片: X (已超出…)]"│
+│  最近 K=1 条含图消息的 imageRef → base64   │
+│  更早的 imageRef → 文本 "[历史图片: X]"    │
 └────────────────────────────────────────────┘
 
 UI 展示：<img src="toolbox-img://<hash>.<ext>">
@@ -228,7 +228,7 @@ UI 展示：<img src="toolbox-img://<hash>.<ext>">
 | `src/main/chat/image-cache.ts` | 压缩管线 + MD5 去重 + 落盘 + 孤儿清理 + 文件名校验 |
 | `src/main/chat/image-protocol.ts` | 注册 `toolbox-img://` 特权协议 + 白名单校验 |
 | `src/main/chat/types.ts` | 新增 `PersistedContentBlock = LLMContentBlock \| LLMImageRefBlock` |
-| `src/main/chat/chat-engine.ts` | `buildUserMessage` 调用 `storeImage`；`prepareLLMMessages` 做 K=3 淡出 |
+| `src/main/chat/chat-engine.ts` | `buildUserMessage` 调用 `storeImage`；`prepareLLMMessages` 做 K=1 淡出 |
 | `plugins/shared/bridge/src/types.ts` | 新增 `LLMImageRefBlock` 和 `chatResendImageRef` 方法 |
 | `src/shell/components/chat/ImageLightbox.vue` | 大图浏览（ESC/←→/另存为） |
 | `src/shell/components/chat/MessageBubble.vue` | 1/2/3+ 网格布局 + 点击 Lightbox + 重发按钮 |
@@ -260,19 +260,37 @@ interface LLMImageRefBlock {
 
 EXIF 方向通过 `sharp(...).rotate()` 自动纠正，避免手机横屏照片显示反转。
 
-### 9.6 历史淡出：K = 3
+### 9.6 历史淡出：K = 1
 
-`prepareLLMMessages` 从消息尾部倒序扫描，收集最近 3 条"含图消息"的索引；这些消息的 `imageRef` 还原为 `LLMImageBlock`，更早的替换为：
+`prepareLLMMessages` 从消息尾部倒序扫描，只对**最近 1 条"含图消息"**的 `imageRef` 还原为 `LLMImageBlock`，更早的替换为：
 
 ```
-[图片: screenshot.png（已超出本轮上下文）]
+[历史图片: screenshot.png]
 ```
 
-文本中带文件名，便于 LLM 理解"这里曾有张叫 X 的图"。
+**为什么选 K=1 而不是 K>1**：
+
+多张图同时送给 LLM 时存在**视觉注意力串扰**（cross-image attention leakage）——
+模型容易把用户当前的问题错答成历史图片的内容。例如：连续发图 A / B / C 并在 C 下问
+"描述这张图"，LLM 可能描述 A 或 B。
+
+K=1 让最新一条 user 消息里只有本次上传的图，LLM 的"这张图"指代明确无歧义。
+历史 assistant 文本与占位 `[历史图片: X]` 仍保留，追问"上次那张图是什么来着"
+这类纯文本话题不会丢失上下文。
 
 **边界**：一条消息里的多张图作为整体处理（要么全还原、要么全降级）。
 
-**重发兜底**：气泡 hover 显示 `⟳` 按钮 → `chat:resend-image-ref` → 读缓存 → 塞入 Composer 附件列表，用户可搭配新 prompt 重新发送。
+**文件丢失**：缓存丢失时占位文本为 `[历史图片: X（缓存已丢失）]`。
+
+**context 超限错误**：LLM 报 `context_length` 时，`stripLastUserImages` 把最后
+一条 user 消息的所有 `imageRef` 替换为 `[历史图片: X（因上下文超限已移除）]`，
+避免同一张坏图反复触发错误。
+
+**重发兜底**：气泡 hover 显示 `⟳` 按钮 → `chat:resend-image-ref` → 读缓存 → 塞入
+Composer 附件列表，用户可搭配新 prompt 重新发送，此时这张图就重新成为"当前图"。
+
+**未来可选**：如需"多图对比"场景，建议引入"钉住参考图"机制（`imageRef.pinned?: boolean`），
+而不是盲目放大 K 值。
 
 ### 9.7 toolbox-img:// 自定义协议
 

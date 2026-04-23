@@ -421,14 +421,21 @@ onBeforeUnmount(() => {
 }
 
 .icon-btn {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 1.1rem;
-  padding: 6px;
+  font-size: 1.15rem;
+  line-height: 1;
+  padding: 0;
   color: var(--text-secondary);
-  border-radius: 6px;
-  transition: background var(--transition);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition), color var(--transition);
 }
 .icon-btn:hover:not(:disabled) {
   background: var(--bg-card-hover);
