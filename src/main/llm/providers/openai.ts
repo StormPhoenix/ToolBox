@@ -21,6 +21,8 @@ import type {
   LLMToolResultBlock,
   LLMImageBlock,
   LLMSystemParam,
+  LLMImageGenOptions,
+  LLMImageGenResult,
 } from '../types';
 import { createLogger } from '../../logger';
 
@@ -70,7 +72,47 @@ export class OpenAIProvider implements LLMProvider {
       streaming: true,
       vision: true,
       maxContext: 128000,
+      imageGeneration: true,
     };
+  }
+
+  async generateImage(options: LLMImageGenOptions): Promise<LLMImageGenResult> {
+    // DALL-E 3 仅支持特定尺寸，不匹配时回退到默认值
+    const SUPPORTED_SIZES = ['1024x1024', '1792x1024', '1024x1792'] as const;
+    type DallESize = typeof SUPPORTED_SIZES[number];
+    const size: DallESize = SUPPORTED_SIZES.includes(options.size as DallESize)
+      ? (options.size as DallESize)
+      : '1024x1024';
+
+    log.info(
+      `generateImage: prompt="${options.prompt.slice(0, 60)}...", ` +
+        `size=${size}, quality=${options.quality ?? 'standard'}, style=${options.style ?? 'vivid'}`
+    );
+
+    const resp = await this.client.images.generate({
+      model: 'dall-e-3',
+      prompt: options.prompt,
+      size,
+      quality: options.quality ?? 'standard',
+      style: options.style ?? 'vivid',
+      response_format: 'b64_json',
+      n: 1, // DALL-E 3 固定只支持 n=1
+    });
+
+    const images: string[] = [];
+    let revised_prompt: string | undefined;
+
+    for (const item of resp.data) {
+      if (item.b64_json) {
+        images.push(item.b64_json);
+      }
+      if (item.revised_prompt) {
+        revised_prompt = item.revised_prompt;
+      }
+    }
+
+    log.info(`generateImage 完成: ${images.length} 张, revised_prompt=${!!revised_prompt}`);
+    return { images, revised_prompt };
   }
 }
 

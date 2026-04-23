@@ -69,6 +69,7 @@ export class ClaudeProvider implements LLMProvider {
       streaming: true,
       vision: true,
       maxContext: 200000,
+      imageGeneration: false,
     };
   }
 }

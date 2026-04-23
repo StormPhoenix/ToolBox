@@ -52,6 +52,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     options?: { system?: string }
   ) => ipcRenderer.invoke('llm:chat', messages, options),
 
+  llmGenerateImage: (options: unknown) =>
+    ipcRenderer.invoke('llm:generate-image', options),
+
   getLLMConfig: () =>
     ipcRenderer.invoke('llm:get-config'),
 

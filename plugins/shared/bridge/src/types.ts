@@ -180,6 +180,44 @@ export interface LLMTestResult {
   error?: string;
 }
 
+/**
+ * 图像生成请求参数
+ *
+ * 各参数对不同 Provider 的生效情况：
+ * | 参数    | OpenAI DALL-E 3       |
+ * |---------|-----------------------|
+ * | size    | ✅ 见下方说明         |
+ * | quality | ✅ standard / hd      |
+ * | style   | ✅ vivid / natural    |
+ * | n       | ✅（固定生成 1 张）   |
+ */
+export interface LLMImageGenOptions {
+  /** 生成图像的文字描述 */
+  prompt: string;
+  /**
+   * 图像尺寸，格式 'WxH'。
+   * OpenAI DALL-E 3 支持: '1024x1024'（默认）、'1792x1024'、'1024x1792'。
+   */
+  size?: string;
+  /** 图像质量，仅 OpenAI 生效。'standard'（默认）速度快，'hd' 细节更丰富。 */
+  quality?: 'standard' | 'hd';
+  /** 图像风格，仅 OpenAI 生效。'vivid'（默认）超现实鲜艳，'natural' 写实自然。 */
+  style?: 'vivid' | 'natural';
+  /** 生成张数。OpenAI DALL-E 3 固定 1 张，传入更大值时忽略。 */
+  n?: number;
+}
+
+/** 图像生成返回结果 */
+export interface LLMImageGenResult {
+  /** base64 编码的图像字符串数组（不含 data URL 前缀） */
+  images: string[];
+  /**
+   * OpenAI 对原始 prompt 的修订版本（DALL-E 3 会自动优化 prompt）。
+   * 其他 Provider 不返回此字段。
+   */
+  revised_prompt?: string;
+}
+
 // ── Image Resize 类型 ────────────────────────────────────────────────────
 
 /** 缩放算法标识。本地经典算法 + 未来 LLM 超分（V2） */
@@ -378,6 +416,27 @@ export interface ElectronAPI {
 
   /** 测试当前配置的连通性，发送一条最小请求验证 API Key 有效性 */
   testLLMConnection(): Promise<LLMTestResult>;
+
+  /**
+   * 图像生成（文生图）。
+   *
+   * 需要当前 Provider 支持图像生成能力（目前仅 OpenAI DALL-E 3）。
+   * 不支持时抛出错误，插件侧应 catch 并给用户友好提示。
+   *
+   * 返回 base64 编码的图像字符串，插件侧可：
+   * - 直接展示：`<img src="data:image/png;base64,${result.images[0]}">`
+   * - 保存文件：`electronAPI.writeFile(path, result.images[0], 'base64')`
+   *
+   * @example
+   * const result = await electronAPI.llmGenerateImage({
+   *   prompt: '一只在樱花树下打盹的橘猫，吉卜力风格',
+   *   size: '1024x1024',
+   *   quality: 'hd',
+   * });
+   * // result.images[0] 为 base64 字符串
+   * // result.revised_prompt 为 OpenAI 修订后的 prompt（可选）
+   */
+  llmGenerateImage(options: LLMImageGenOptions): Promise<LLMImageGenResult>;
 
   // ── Image Resize ─────────────────────────────────────────────────────────
 

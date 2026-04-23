@@ -202,6 +202,7 @@ plugins/
 | `getLLMConfig()` | `llm:get-config` | 获取当前 LLM 配置（脱敏，apiKey 掩码） |
 | `setLLMConfig(config)` | `llm:set-config` | 更新 LLM 配置（provider / apiKey / model / baseURL） |
 | `testLLMConnection()` | `llm:test-connection` | 测试当前配置连通性，返回 `{ ok, error? }` |
+| `llmGenerateImage(options)` | `llm:generate-image` | 文生图，返回 `LLMImageGenResult`（base64 数组 + 可选 revised_prompt）；当前仅 OpenAI DALL-E 3 支持，Claude/Gemini 抛错 |
 | `listResizeProviders()` | `image-resize:list-providers` | 列出图像缩放算法 Provider（classical / ai 分组，含 available 状态） |
 | `parseImageMetadata(filePath)` | `image-resize:parse-metadata` | 解析图片基本信息 + EXIF（sharp + exifr），同时生成 256px 略缩图，分配 `sessionId` |
 | `resizeImage(inputPath, options, sessionId)` | `image-resize:process` | 按 `ResizeOptions` 处理图片，结果写入临时文件，返回 `ResizeResponse` |

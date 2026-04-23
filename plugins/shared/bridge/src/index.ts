@@ -31,6 +31,8 @@ export type {
   LLMConfigPublic,
   LLMConfigInput,
   LLMTestResult,
+  LLMImageGenOptions,
+  LLMImageGenResult,
   // Image Resize 类型
   ResizeAlgorithmId,
   ResizeCategory,

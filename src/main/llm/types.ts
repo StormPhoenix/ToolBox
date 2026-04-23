@@ -89,6 +89,56 @@ export interface LLMResponse {
   };
 }
 
+// ─── 图像生成 ───────────────────────────────────────────────
+
+/**
+ * 图像生成请求参数
+ *
+ * 各参数对不同 Provider 的生效情况：
+ * | 参数    | OpenAI DALL-E 3 | Gemini（本期不实现） |
+ * |---------|-----------------|----------------------|
+ * | size    | ✅              | —                    |
+ * | quality | ✅              | —                    |
+ * | style   | ✅              | —                    |
+ * | n       | ✅（固定 1）    | —                    |
+ */
+export interface LLMImageGenOptions {
+  /** 生成图像的文字描述 */
+  prompt: string;
+  /**
+   * 图像尺寸，格式 'WxH'。
+   * OpenAI DALL-E 3 支持: '1024x1024'（默认）、'1792x1024'、'1024x1792'。
+   * 传入不支持的值时 Provider 使用默认尺寸。
+   */
+  size?: string;
+  /**
+   * 图像质量。仅 OpenAI 生效。
+   * 'standard'（默认）：速度更快；'hd'：细节更丰富。
+   */
+  quality?: 'standard' | 'hd';
+  /**
+   * 图像风格。仅 OpenAI 生效。
+   * 'vivid'（默认）：超现实鲜艳；'natural'：更自然写实。
+   */
+  style?: 'vivid' | 'natural';
+  /**
+   * 生成张数。
+   * OpenAI DALL-E 3 固定只能生成 1 张，传入 n > 1 时忽略。
+   */
+  n?: number;
+}
+
+/** 图像生成返回结果 */
+export interface LLMImageGenResult {
+  /** base64 编码的图像字符串数组（不含 data URL 前缀） */
+  images: string[];
+  /**
+   * OpenAI 对 prompt 的修订版本（DALL-E 3 会自动优化 prompt）。
+   * 其他 Provider 不返回此字段。
+   */
+  revised_prompt?: string;
+}
+
 // ─── Provider 接口 ─────────────────────────────────────────
 
 export interface LLMProviderConfig {
@@ -109,11 +159,20 @@ export interface LLMProvider {
     toolChoice?: LLMToolChoice
   ): Promise<LLMResponse>;
 
+  /**
+   * 图像生成（可选）。
+   * 不支持此能力的 Provider 不实现此方法，
+   * 调用方需先检查 capabilities.imageGeneration。
+   */
+  generateImage?(options: LLMImageGenOptions): Promise<LLMImageGenResult>;
+
   get capabilities(): {
     toolUse: boolean;
     streaming: boolean;
     vision: boolean;
     maxContext: number;
+    /** 是否支持图像生成 */
+    imageGeneration: boolean;
   };
 }
 
@@ -166,3 +225,5 @@ export interface LLMChatResult {
   text: string;
   usage?: { input_tokens: number; output_tokens: number };
 }
+
+// llm:generate-image 入参/出参直接复用 LLMImageGenOptions / LLMImageGenResult（见上方定义）

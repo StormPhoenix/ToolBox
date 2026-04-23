@@ -71,6 +71,7 @@ export class GeminiProvider implements LLMProvider {
       streaming: true,
       vision: true,
       maxContext: 1000000,
+      imageGeneration: false,
     };
   }
 }

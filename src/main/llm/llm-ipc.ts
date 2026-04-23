@@ -19,6 +19,8 @@ import type {
   LLMConfigInput,
   LLMMessageParam,
   LLMChatResult,
+  LLMImageGenOptions,
+  LLMImageGenResult,
   ProviderType,
 } from './types';
 import { createLogger } from '../logger';
@@ -246,6 +248,39 @@ export function registerLLMHandlers(): void {
         log.warn(`连接测试失败: ${msg}`);
         return { ok: false, error: msg };
       }
+    }
+  );
+
+  // ── llm:generate-image ──────────────────────────────────
+  ipcMain.handle(
+    'llm:generate-image',
+    async (_e, options: LLMImageGenOptions): Promise<LLMImageGenResult> => {
+      const r = await getRouter();
+      const provider = r.getProvider();
+      if (!provider) {
+        throw new Error('LLM 未配置，请先在设置中填写 API Key 和模型名称');
+      }
+      if (!provider.capabilities.imageGeneration) {
+        const providerName = r.getProviderName();
+        throw new Error(`当前 Provider (${providerName}) 不支持图像生成`);
+      }
+      if (!provider.generateImage) {
+        throw new Error('Provider 未实现图像生成方法');
+      }
+
+      log.info(
+        `llm:generate-image 请求: prompt="${options.prompt.slice(0, 60)}...", ` +
+          `provider=${r.getProviderName()}`
+      );
+
+      const result = await provider.generateImage(options);
+
+      log.info(
+        `llm:generate-image 完成: images=${result.images.length}, ` +
+          `revised_prompt=${!!result.revised_prompt}`
+      );
+
+      return result;
     }
   );
 
