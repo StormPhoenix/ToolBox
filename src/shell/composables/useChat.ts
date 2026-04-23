@@ -177,10 +177,19 @@ async function sendMessage(
   activeSession.value.messages.push(optimisticUserMsg);
 
   try {
+    // 关键：Electron IPC 通过 structured clone 序列化参数，
+    // 不能直接传 Vue 响应式代理对象（会抛 "An object could not be cloned."）。
+    // 因此把 attachments 转为纯 POJO 数组再发送。
+    const plainAttachments = attachments?.map((a) => ({
+      name: a.name,
+      mediaType: a.mediaType,
+      base64: a.base64,
+    }));
+
     const result = await window.electronAPI.chatSend({
       sessionId,
       userText,
-      attachments,
+      attachments: plainAttachments,
     });
     // 用主进程返回的真实 id 替换乐观 id
     optimisticUserMsg.id = result.userMessageId;
