@@ -1,5 +1,11 @@
 <template>
-  <div class="chat-view">
+  <div
+    class="chat-view"
+    @dragenter.prevent="onDragEnter"
+    @dragover.prevent="onDragOver"
+    @dragleave="onDragLeave"
+    @drop.prevent="onDrop"
+  >
     <SessionList
       :sessions="sessions"
       :active-id="activeSession?.id ?? null"
@@ -49,8 +55,11 @@
           :is-streaming="isStreaming"
           :error-message="lastError"
           @dismiss-error="dismissError"
+          @resend-image="onResendImage"
+          @open-lightbox="onOpenLightbox"
         />
         <Composer
+          ref="composerRef"
           :is-streaming="isStreaming"
           :disabled="!llmAvailable"
           @submit="onSubmit"
@@ -58,6 +67,26 @@
         />
       </template>
     </div>
+
+    <!-- 拖拽遮罩 -->
+    <div
+      v-if="isDragging && activeSession && llmAvailable"
+      class="drop-overlay"
+    >
+      <div class="drop-overlay-inner">
+        <div class="drop-icon">📥</div>
+        <div class="drop-title">释放鼠标以添加图片</div>
+        <div class="drop-hint">支持 JPG / PNG / GIF / WEBP · 单张 ≤ 10MB</div>
+      </div>
+    </div>
+
+    <!-- 图片 Lightbox -->
+    <ImageLightbox
+      v-if="lightboxState"
+      :items="lightboxState.items"
+      :start-index="lightboxState.startIndex"
+      @close="lightboxState = null"
+    />
   </div>
 </template>
 
@@ -68,6 +97,7 @@ import SessionList from './SessionList.vue';
 import ChatHeader from './ChatHeader.vue';
 import MessageList from './MessageList.vue';
 import Composer from './Composer.vue';
+import ImageLightbox, { type LightboxItem } from './ImageLightbox.vue';
 import { useChat } from '../../composables/useChat';
 
 defineEmits<{
@@ -157,11 +187,109 @@ async function onSubmit(payload: {
   await sendMessage(payload.text, payload.attachments);
 }
 
+// ── 拖拽上传 ─────────────────────────────────────────────
+
+const isDragging = ref(false);
+let dragCounter = 0;
+
+function hasFiles(e: DragEvent): boolean {
+  return !!e.dataTransfer?.types?.includes('Files');
+}
+
+function onDragEnter(e: DragEvent): void {
+  if (!hasFiles(e)) return;
+  dragCounter++;
+  isDragging.value = true;
+}
+
+function onDragOver(e: DragEvent): void {
+  if (hasFiles(e) && e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy';
+  }
+}
+
+function onDragLeave(): void {
+  dragCounter = Math.max(0, dragCounter - 1);
+  if (dragCounter === 0) isDragging.value = false;
+}
+
+const composerRef = ref<InstanceType<typeof Composer> | null>(null);
+const SUPPORTED = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+async function onDrop(e: DragEvent): Promise<void> {
+  dragCounter = 0;
+  isDragging.value = false;
+  if (!activeSession.value || !llmAvailable.value) return;
+
+  const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
+    SUPPORTED.includes(f.type)
+  );
+  if (files.length === 0) return;
+
+  const atts: ChatAttachmentInput[] = [];
+  for (const file of files) {
+    try {
+      const base64 = await readFileAsBase64(file);
+      atts.push({
+        name: file.name,
+        mediaType: file.type as ChatAttachmentInput['mediaType'],
+        base64,
+      });
+    } catch (err) {
+      console.error('读取拖拽文件失败:', err);
+    }
+  }
+  if (atts.length > 0) {
+    composerRef.value?.addAttachments(atts);
+  }
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const result = reader.result as string;
+      const idx = result.indexOf('base64,');
+      resolve(idx >= 0 ? result.slice(idx + 7) : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── "重新发送此图" 回调 ─────────────────────────────────
+
+async function onResendImage(ref: {
+  cachePath: string;
+  hash: string;
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  fileName: string;
+}): Promise<void> {
+  const att = await window.electronAPI.chatResendImageRef(ref);
+  if (!att) {
+    console.warn('chatResendImageRef 返回 null：缓存已丢失');
+    return;
+  }
+  composerRef.value?.addAttachments([att]);
+}
+
+// ── Lightbox ─────────────────────────────────────────────
+
+const lightboxState = ref<{
+  items: LightboxItem[];
+  startIndex: number;
+} | null>(null);
+
+function onOpenLightbox(params: { items: LightboxItem[]; index: number }): void {
+  lightboxState.value = { items: params.items, startIndex: params.index };
+}
+
 defineExpose({ reloadLLMConfig });
 </script>
 
 <style scoped>
 .chat-view {
+  position: relative;
   flex: 1;
   display: flex;
   min-height: 0;
@@ -225,5 +353,44 @@ defineExpose({ reloadLLMConfig });
 .cta-btn:hover {
   background: var(--accent-light);
   transform: translateY(-1px);
+}
+
+/* 拖拽遮罩 */
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(108, 92, 231, 0.18);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none; /* 不拦截 drop 事件 */
+  z-index: 20;
+}
+
+.drop-overlay-inner {
+  padding: 28px 44px;
+  background: var(--bg-card);
+  border: 2px dashed var(--accent);
+  border-radius: 16px;
+  color: var(--text-primary);
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.drop-icon {
+  font-size: 2.4rem;
+  margin-bottom: 10px;
+}
+
+.drop-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.drop-hint {
+  font-size: 0.8rem;
+  color: var(--text-dim);
 }
 </style>

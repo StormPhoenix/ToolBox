@@ -43,20 +43,19 @@ function handleChatEvent(event: ChatEvent): void {
       break;
 
     case 'stream-end': {
-      // assistant 消息已由主进程持久化，这里追加到本地 session
-      if (activeSession.value) {
-        const assistantMsg: ChatMessage = {
-          id: event.assistantMessageId,
-          role: 'assistant',
-          content: event.text,
-          timestamp: Date.now(),
-        };
-        activeSession.value.messages.push(assistantMsg);
-        activeSession.value.updatedAt = Date.now();
-      }
       streamingText.value = '';
       currentRequestId.value = null;
       lastError.value = null;
+      // 从主进程重新加载会话：把乐观版本的 image 块替换为已落盘的 image_ref
+      // 同时追加刚生成的 assistant 消息（主进程已持久化）
+      if (activeSession.value) {
+        const id = activeSession.value.id;
+        void window.electronAPI.chatLoadSession(id).then((fresh) => {
+          if (fresh && activeSession.value?.id === id) {
+            activeSession.value = fresh;
+          }
+        });
+      }
       // 刷新会话列表（更新时间 / 标题自动命名）
       void refreshSessions();
       break;
@@ -66,6 +65,15 @@ function handleChatEvent(event: ChatEvent): void {
       lastError.value = event.message;
       streamingText.value = '';
       currentRequestId.value = null;
+      // 错误后也重新加载一次：主进程可能已剥离图片引用
+      if (activeSession.value) {
+        const id = activeSession.value.id;
+        void window.electronAPI.chatLoadSession(id).then((fresh) => {
+          if (fresh && activeSession.value?.id === id) {
+            activeSession.value = fresh;
+          }
+        });
+      }
       break;
 
     case 'aborted':

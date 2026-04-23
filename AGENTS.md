@@ -38,9 +38,11 @@ ToolBox/
 │   │   │       ├── openai.ts         # OpenAIProvider（openai SDK，兼容第三方）
 │   │   │       └── gemini.ts         # GeminiProvider（@google/genai）
 │   │   ├── chat/                     # LLM Chat 对话引擎（主进程侧）
-│   │   │   ├── types.ts              # ChatMessage / ChatSession / ChatEvent
+│   │   │   ├── types.ts              # ChatMessage / ChatSession / ChatEvent / PersistedContentBlock
 │   │   │   ├── session-store.ts      # 会话持久化（userData/chat-sessions/）
-│   │   │   ├── chat-engine.ts        # 抢占式流式引擎 + 错误分类
+│   │   │   ├── image-cache.ts        # 图片压缩 + MD5 去重 + 孤儿清理（userData/chat-images/）
+│   │   │   ├── image-protocol.ts     # toolbox-img:// 自定义协议注册
+│   │   │   ├── chat-engine.ts        # 抢占式流式引擎 + K=3 历史淡出 + 错误剥离图片
 │   │   │   └── chat-ipc.ts           # IPC handlers + 事件广播
 │   │   └── image-resize/             # 图像分辨率调整框架（主进程侧，sharp + exifr）
 │   │       ├── types.ts              # ResizeProvider 接口、Options、Response 等
@@ -69,13 +71,14 @@ ToolBox/
 │       │   ├── ToolViewer.vue        # webview 插件查看器
 │       │   ├── Settings.vue          # 设置页（LLM Provider / API Key / Model 配置）
 │       │   └── chat/                 # LLM Chat 对话 UI（V1 纯对话）
-│       │       ├── ChatView.vue      # 两栏容器 + 空态 / 未配置态
+│       │       ├── ChatView.vue      # 两栏容器 + 空态 / 未配置态 + 拖拽上传遮罩 + Lightbox 宿主
 │       │       ├── SessionList.vue   # 左栏：会话列表（新建/选中/重命名/删除）
 │       │       ├── ChatHeader.vue    # 顶部：标题 + 模型徽章 + 清空/设置
 │       │       ├── MessageList.vue   # 消息滚动区（自动滚底 + 跳到底部按钮）
-│       │       ├── MessageBubble.vue # 单条消息气泡（user/assistant）
+│       │       ├── MessageBubble.vue # 单条消息气泡（user/assistant，图片 1/2/3+ 网格 + Lightbox）
 │       │       ├── StreamingBubble.vue # 正在生成中气泡（打字指示器）
-│       │       ├── Composer.vue      # 输入框 + 附件 + 发送/停止
+│       │       ├── Composer.vue      # 输入框 + 附件网格 + 发送/停止（单张 10MB / 6 张限制）
+│       │       ├── ImageLightbox.vue # 图片大图浏览（ESC/←→/另存为）
 │       │       └── MarkdownView.vue  # markdown-it + highlight.js 渲染
 │       ├── composables/
 │       │   ├── usePlugins.ts         # 插件注册表状态管理 composable
@@ -232,6 +235,7 @@ plugins/
 | `chatClearContext(id)` | `chat:clear-context` | 清空会话消息（保留会话） |
 | `chatSend(input)` | `chat:send` | 发送用户消息；立即返回 `{ requestId, userMessageId }`，真实回复通过 `chat:event` 事件流推送 |
 | `chatAbort(requestId)` | `chat:abort` | 中止指定进行中的请求 |
+| `chatResendImageRef(ref)` | `chat:resend-image-ref` | 根据历史 `imageRef` 读缓存文件返回 `ChatAttachmentInput`，供 Composer 再次使用 |
 | `onChatEvent(cb)` | `chat:event`（push） | 订阅 Chat 事件流（`stream-chunk` / `stream-end` / `error` / `aborted`），返回 dispose 函数 |
 
 **新增 IPC 通道三步骤：**

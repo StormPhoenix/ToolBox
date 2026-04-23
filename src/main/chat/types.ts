@@ -7,13 +7,25 @@
  * - 与 LLM 层的 LLMMessageParam 相互转换由 chat-engine 负责
  */
 import type { LLMContentBlock, LLMMessageParam, ProviderType } from '../llm/types';
+import type { LLMImageRefBlock } from './image-cache';
 
 // ─── 会话与消息 ────────────────────────────────────────────
 
 /**
+ * 持久化层的消息 content 联合类型。
+ *
+ * - 运行时（发送 LLM）用 LLMContentBlock（含 image 的 base64）
+ * - 持久化到磁盘时，image 块会被替换为 image_ref 块（仅含 cachePath + hash）
+ * - 加载回内存后，chat-engine 按 K=3 规则按需还原 base64
+ *
+ * 两种形态共用一个联合以避免双份 ChatMessage 类型。
+ */
+export type PersistedContentBlock = LLMContentBlock | LLMImageRefBlock;
+
+/**
  * 单条消息（持久化结构）。
  *
- * - role=user：content 可能是纯字符串，也可能是 text+image 的 block 数组
+ * - role=user：content 可能是纯字符串，或 text + image_ref + image 的 block 数组
  * - role=assistant：V1 只会是纯字符串（无 tool_use）
  *
  * V1 不存 error 气泡（error 只走事件流显示，不入历史）。
@@ -22,10 +34,10 @@ export interface ChatMessage {
   /** UI 使用的消息 ID（uuid） */
   id: string;
   role: 'user' | 'assistant';
-  content: string | LLMContentBlock[];
+  content: string | PersistedContentBlock[];
   /** 创建时间 ms */
   timestamp: number;
-  /** 附件展示元数据（真实 base64 已在 content image block 中） */
+  /** 附件展示元数据（真实图片在 content.image_ref 块中） */
   attachments?: Array<{ name: string; mediaType: string }>;
   /** 本条消息产生时使用的模型快照，便于日后追溯 */
   model?: { provider: ProviderType; model: string };
@@ -115,11 +127,6 @@ export interface ChatSendResult {
 }
 
 // ─── 内部工具函数 ──────────────────────────────────────────
-
-/** 将 ChatMessage[] 转换为 LLMMessageParam[]（去掉 UI 字段） */
-export function toLLMMessages(messages: ChatMessage[]): LLMMessageParam[] {
-  return messages.map((m) => ({
-    role: m.role,
-    content: m.content,
-  }));
-}
+// （历史遗留的 toLLMMessages 已移除：运行时转换由 chat-engine.prepareLLMMessages
+//  完成，因为它还要负责 image_ref → image 还原与 K=3 历史淡出。）
+export type { LLMMessageParam };

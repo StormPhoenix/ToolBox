@@ -17,6 +17,8 @@
         v-for="msg in messages"
         :key="msg.id"
         :message="msg"
+        @open-lightbox="(p) => $emit('open-lightbox', p)"
+        @resend-image="(r) => $emit('resend-image', r)"
       />
 
       <StreamingBubble v-if="isStreaming" :text="streamingText" />
@@ -55,6 +57,7 @@ import { ref, nextTick, watch } from 'vue';
 import type { ChatMessage } from '@toolbox/bridge';
 import MessageBubble from './MessageBubble.vue';
 import StreamingBubble from './StreamingBubble.vue';
+import type { LightboxItem } from './ImageLightbox.vue';
 
 const props = defineProps<{
   messages: ChatMessage[];
@@ -65,6 +68,13 @@ const props = defineProps<{
 
 defineEmits<{
   'dismiss-error': [];
+  'open-lightbox': [params: { items: LightboxItem[]; index: number }];
+  'resend-image': [ref: {
+    cachePath: string;
+    hash: string;
+    mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+    fileName: string;
+  }];
 }>();
 
 const scrollRef = ref<HTMLElement | null>(null);

@@ -102,6 +102,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chatAbort: (requestId: string) =>
     ipcRenderer.invoke('chat:abort', requestId),
 
+  chatResendImageRef: (ref: unknown) =>
+    ipcRenderer.invoke('chat:resend-image-ref', ref),
+
   /**
    * 订阅 chat 事件流，返回一个 dispose 函数用于取消订阅。
    * 主进程通过 webContents.send('chat:event', event) 推送事件。

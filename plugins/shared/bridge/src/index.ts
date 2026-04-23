@@ -54,6 +54,7 @@ export type {
   ChatSendInput,
   ChatSendResult,
   ChatEvent,
+  LLMImageRefBlock,
 } from './types';
 
 export { createLogger } from './logger';

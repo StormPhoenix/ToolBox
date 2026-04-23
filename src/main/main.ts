@@ -11,6 +11,11 @@ import {
 import { registerLLMHandlers } from './llm/llm-ipc';
 import { registerImageResizeHandlers } from './image-resize/image-ipc';
 import { registerChatHandlers } from './chat/chat-ipc';
+import {
+  registerImageProtocolSchemes,
+  registerImageProtocolHandler,
+} from './chat/image-protocol';
+import { cleanOrphanImages } from './chat/image-cache';
 
 // 构建期由 vite.main.config.ts define 注入的全局常量
 declare const __GIT_HASH__: string;
@@ -19,6 +24,9 @@ declare const __BUILD_TIME__: string;
 
 // 尽早初始化管道保护（在任何 console 调用之前）
 initPipeGuard();
+
+// 注册 toolbox-img:// 自定义协议为特权（必须在 app.ready 前）
+registerImageProtocolSchemes();
 
 const log = createLogger('Main');
 
@@ -185,6 +193,11 @@ app.whenReady().then(() => {
   registerLLMHandlers();
   registerImageResizeHandlers();
   registerChatHandlers();
+  registerImageProtocolHandler();
+  // 启动时清理不再被引用的图片缓存（不阻塞启动）
+  void cleanOrphanImages().catch((err) =>
+    log.warn(`cleanOrphanImages 异常: ${(err as Error).message}`)
+  );
   log.info('应用初始化完成');
 
   createSplashWindow();

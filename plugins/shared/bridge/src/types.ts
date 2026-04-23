@@ -333,10 +333,48 @@ export interface SaveResizedResult {
 // ── Chat 类型（Shell 内置对话功能） ───────────────────────────────────────
 
 /**
- * Chat 消息内容块（持久化用）。
- * 复用 LLM 消息内容结构，含 text 与 image。
+ * 持久化图片引用块（Chat 专用）。
+ *
+ * 持久化的 user 消息中，图片不会直接存 base64，而是存为 image_ref：
+ *   - cachePath：主进程本地绝对路径（UI 不直接用，靠 hash 拼 toolbox-img://）
+ *   - hash：MD5（即缓存文件名 stem）；UI 构造 `toolbox-img://<hash>.<ext>` 加载
+ *   - mediaType：最终落盘的 MIME（可能因压缩从 webp 转为 png）
+ *   - fileName：原始文件名（仅展示）
+ *   - byteSize/width/height：展示辅助
+ *
+ * 主进程发送给 LLM 前会还原为 LLMImageBlock；UI 只读这些字段即可。
  */
-export type ChatMessageContent = LLMMessageContent;
+export interface LLMImageRefBlock {
+  type: 'image_ref';
+  cachePath: string;
+  hash: string;
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  fileName: string;
+  byteSize: number;
+  width?: number;
+  height?: number;
+}
+
+/**
+ * Chat 持久化消息的 content 联合类型。
+ *
+ * 相比 LLMMessageContent（插件侧 llmChat 使用的窄类型），Chat 额外支持：
+ *  - image_ref 块：运行时由主进程还原为 image
+ */
+export type ChatMessageContent =
+  | string
+  | Array<
+      | { type: 'text'; text: string }
+      | {
+          type: 'image';
+          source: {
+            type: 'base64';
+            media_type: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+            data: string;
+          };
+        }
+      | LLMImageRefBlock
+    >;
 
 /** 持久化的单条消息 */
 export interface ChatMessage {
@@ -578,6 +616,18 @@ export interface ElectronAPI {
 
   /** 中止指定 requestId 对应的进行中请求 */
   chatAbort(requestId: string): Promise<void>;
+
+  /**
+   * 基于历史 imageRef 读取缓存文件内容，返回 ChatAttachmentInput。
+   * UI 点击消息气泡"重新发送此图"时调用，得到 base64 后塞入当前 Composer 附件列表。
+   * 返回 null 表示缓存文件已丢失。
+   */
+  chatResendImageRef(ref: {
+    cachePath: string;
+    hash: string;
+    mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+    fileName: string;
+  }): Promise<ChatAttachmentInput | null>;
 
   /**
    * 订阅 Chat 事件流。

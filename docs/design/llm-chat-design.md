@@ -174,3 +174,140 @@ userData/
 - 二次 LLM 错误恢复（角色化道歉）
 - 多模型并排对比 / 模型快速切换
 - 导出会话为 Markdown
+
+---
+
+## 9. V1.1 — 图片链路健壮化（已落地）
+
+### 9.1 背景
+
+V1 把图片 base64 直接塞进会话 JSON，随消息一起送入 LLM。问题：
+
+| 问题 | 现象 |
+|---|---|
+| 会话 JSON 体积膨胀 | 单图 4K 原图 ≈ 8MB base64，10 条消息即可让 JSON 上百 MB |
+| 读写延迟高 | 切换会话一次性 `JSON.parse` 几十 MB 字符串，UI 卡顿 |
+| 长会话 context 爆炸 | 所有历史图一起塞进 LLM，token 消耗不受控 |
+| 无防呆 | 用户粘贴超大图直接 OOM |
+
+### 9.2 设计
+
+```
+┌────────────── 用户 Composer ──────────────┐
+│  选择 / 粘贴 / 拖拽 → base64（前端内存）    │
+│  校验：单张 ≤ 10MB、单条 ≤ 6 张             │
+└──────────────────┬─────────────────────────┘
+                   │ chat:send（含 base64）
+                   ▼
+┌────────────── 主进程 chat-engine ─────────┐
+│  buildUserMessage():                        │
+│    for each attachment:                     │
+│      sharp 压缩（长边≤1568, EXIF 纠正）    │
+│      MD5(压缩 buffer) → <hash>.<ext>       │
+│      写 userData/chat-images/ (去重)        │
+│      返回 imageRef { cachePath, hash, … }   │
+│  ChatMessage.content 用 imageRef 存盘       │
+└──────────────────┬─────────────────────────┘
+                   │ 持久化到 chat-sessions/
+                   │
+                   │ 发送到 LLM 前：
+                   ▼
+┌────────────── prepareLLMMessages ─────────┐
+│  最近 K=3 条含图消息的 imageRef → base64   │
+│  更早的 imageRef → 文本 "[图片: X (已超出…)]"│
+└────────────────────────────────────────────┘
+
+UI 展示：<img src="toolbox-img://<hash>.<ext>">
+        自定义协议 handler 读 chat-images/ 文件
+```
+
+### 9.3 关键文件
+
+| 文件 | 职责 |
+|---|---|
+| `src/main/chat/image-cache.ts` | 压缩管线 + MD5 去重 + 落盘 + 孤儿清理 + 文件名校验 |
+| `src/main/chat/image-protocol.ts` | 注册 `toolbox-img://` 特权协议 + 白名单校验 |
+| `src/main/chat/types.ts` | 新增 `PersistedContentBlock = LLMContentBlock \| LLMImageRefBlock` |
+| `src/main/chat/chat-engine.ts` | `buildUserMessage` 调用 `storeImage`；`prepareLLMMessages` 做 K=3 淡出 |
+| `plugins/shared/bridge/src/types.ts` | 新增 `LLMImageRefBlock` 和 `chatResendImageRef` 方法 |
+| `src/shell/components/chat/ImageLightbox.vue` | 大图浏览（ESC/←→/另存为） |
+| `src/shell/components/chat/MessageBubble.vue` | 1/2/3+ 网格布局 + 点击 Lightbox + 重发按钮 |
+| `src/shell/components/chat/Composer.vue` | 附件网格缩略图 + 限制校验 |
+| `src/shell/components/chat/ChatView.vue` | 拖拽上传遮罩 + Lightbox 容器 |
+
+### 9.4 imageRef 块定义
+
+```ts
+interface LLMImageRefBlock {
+  type: 'image_ref';
+  cachePath: string;   // 主进程本地绝对路径
+  hash: string;        // MD5 — 也是缓存文件名 stem
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  fileName: string;    // 原始文件名（仅展示）
+  byteSize: number;    // 落盘字节数
+  width?: number;
+  height?: number;
+}
+```
+
+### 9.5 压缩策略
+
+| 源格式 | 阈值 | 输出 |
+|---|---|---|
+| JPEG | 长边 > 1568 等比缩小 + `withoutEnlargement` | JPEG quality=85, mozjpeg |
+| PNG / WEBP | 同上 | PNG compressionLevel=9 |
+| GIF | **直通**（避免丢失动画帧） | 原样存盘 |
+
+EXIF 方向通过 `sharp(...).rotate()` 自动纠正，避免手机横屏照片显示反转。
+
+### 9.6 历史淡出：K = 3
+
+`prepareLLMMessages` 从消息尾部倒序扫描，收集最近 3 条"含图消息"的索引；这些消息的 `imageRef` 还原为 `LLMImageBlock`，更早的替换为：
+
+```
+[图片: screenshot.png（已超出本轮上下文）]
+```
+
+文本中带文件名，便于 LLM 理解"这里曾有张叫 X 的图"。
+
+**边界**：一条消息里的多张图作为整体处理（要么全还原、要么全降级）。
+
+**重发兜底**：气泡 hover 显示 `⟳` 按钮 → `chat:resend-image-ref` → 读缓存 → 塞入 Composer 附件列表，用户可搭配新 prompt 重新发送。
+
+### 9.7 toolbox-img:// 自定义协议
+
+- `app.whenReady()` **之前** 调用 `registerImageProtocolSchemes()` 将协议声明为 privileged（secure/standard/corsEnabled）
+- `app.whenReady()` **之后** 调用 `registerImageProtocolHandler()`
+- URL 格式：`toolbox-img://<md5>.<ext>`
+- 文件名必须匹配 `/^[a-f0-9]{32}\.(png|jpe?g|gif|webp)$/`，且解析后绝对路径必须以 `userData/chat-images/` 为前缀
+
+UI 层 `<img :src="toolbox-img://${hash}.${ext}">` 零 base64 内存占用，切换会话即时。
+
+### 9.8 上限与错误恢复
+
+| 场景 | 处理 |
+|---|---|
+| 单张 > 10MB | Composer 弹警告条，拒绝入列 |
+| 单条 > 6 张 | 同上；拖拽/粘贴/选择均生效 |
+| LLM 返回 `context_length / 413` | `stripLastUserImages` 剥离最后一条 user 的 imageRef，UI 显示"已清除图片引用"提示 |
+| 缓存文件丢失 | `loadImageBase64` 返回 null → 降级为 `[图片: X（文件已丢失）]` |
+| 启动时存在孤儿 | `cleanOrphanImages` 扫描所有会话 JSON，删除未引用的文件 |
+
+### 9.9 UI 新增交互
+
+| 功能 | 操作 |
+|---|---|
+| 拖拽上传 | 整个 ChatView 响应 drag；drop 时遮罩消失，图片注入 Composer |
+| Lightbox | 点击消息气泡任一图 → 全屏；ESC 关闭，←/→ 切换，`💾 另存为` |
+| 重发此图 | 气泡 hover 显示 `⟳` 按钮 |
+| 附件网格 | Composer 附件区 72×56 网格，hover 显示 `✕` 移除 |
+| 消息网格 | 1 张 → 240×180；2 张 → 180×135×2；3+ 张 → 120×90 grid(3)，超过 9 张末格显示 `+N` |
+
+### 9.10 已明确不做
+
+- 按不同 Provider 差异化压缩阈值（统一 1568）
+- 原图备份（`<hash>.orig.*`）
+- 视觉模型独立切换
+- 截图工具输入
+- 图片编辑 / 旋转 / 裁剪
+

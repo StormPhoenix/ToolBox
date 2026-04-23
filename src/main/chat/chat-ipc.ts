@@ -2,17 +2,18 @@
  * Chat IPC Handlers
  *
  * 注册以下 IPC 通道：
- *   chat:list-sessions    — 列出所有会话（轻量索引）
- *   chat:load-session     — 加载单个会话完整数据
- *   chat:create-session   — 新建空会话
- *   chat:delete-session   — 删除会话
- *   chat:rename-session   — 重命名会话
- *   chat:clear-context    — 清空会话消息（保留会话）
- *   chat:send             — 发送用户消息，流式回复
- *   chat:abort            — 中止进行中的请求
+ *   chat:list-sessions      — 列出所有会话（轻量索引）
+ *   chat:load-session       — 加载单个会话完整数据
+ *   chat:create-session     — 新建空会话
+ *   chat:delete-session     — 删除会话
+ *   chat:rename-session     — 重命名会话
+ *   chat:clear-context      — 清空会话消息（保留会话）
+ *   chat:send               — 发送用户消息，流式回复
+ *   chat:abort              — 中止进行中的请求
+ *   chat:resend-image-ref   — 从历史 imageRef 读取 base64，供 Composer 再次使用
  *
  * 事件推送（向所有渲染进程）：
- *   chat:event            — ChatEvent 联合类型（stream-chunk / stream-end / error / aborted）
+ *   chat:event              — ChatEvent 联合类型（stream-chunk / stream-end / error / aborted）
  */
 import { ipcMain, webContents } from 'electron';
 import type {
@@ -25,9 +26,22 @@ import type {
 } from './types';
 import * as store from './session-store';
 import * as engine from './chat-engine';
+import {
+  loadImageBase64,
+  type LLMImageRefBlock,
+  type SupportedMediaType,
+} from './image-cache';
 import { createLogger } from '../logger';
 
 const log = createLogger('Chat-IPC');
+
+/** UI 传入的 imageRef 载荷（部分字段即可） */
+interface ResendImageRefInput {
+  cachePath: string;
+  hash: string;
+  mediaType: SupportedMediaType;
+  fileName: string;
+}
 
 /** 广播事件到所有渲染进程（Shell 当前只有一个主窗口，但保守广播） */
 function broadcastEvent(event: ChatEvent): void {
@@ -107,5 +121,29 @@ export function registerChatHandlers(): void {
     engine.abortRequest(requestId);
   });
 
+  // ── chat:resend-image-ref ───────────────────────────────
+  // UI 点击历史气泡"重新发送此图" → 读取 cachePath → 返回 base64 给 Composer
+  ipcMain.handle(
+    'chat:resend-image-ref',
+    async (_e, ref: ResendImageRefInput): Promise<ChatAttachmentInput | null> => {
+      const pseudoRef: LLMImageRefBlock = {
+        type: 'image_ref',
+        cachePath: ref.cachePath,
+        hash: ref.hash,
+        mediaType: ref.mediaType,
+        fileName: ref.fileName,
+        byteSize: 0,
+      };
+      const base64 = await loadImageBase64(pseudoRef);
+      if (!base64) return null;
+      return {
+        name: ref.fileName,
+        mediaType: ref.mediaType,
+        base64,
+      };
+    }
+  );
+
   log.info('Chat IPC handlers 已注册');
 }
+
