@@ -2,17 +2,21 @@
  * Skill IPC Handlers
  *
  * 注册以下 IPC 通道：
- *   skill:list         — 获取所有 Skill 状态列表
- *   skill:toggle       — 启用/禁用指定 Skill
- *   skill:open-dir     — 在资源管理器中打开用户 Skill 目录
- *
- * 在 main.ts 中调用 registerSkillHandlers() 完成注册。
+ *   skill:list              — 获取所有 Skill 状态列表
+ *   skill:toggle            — 启用/禁用指定 Skill
+ *   skill:open-dir          — 打开用户 Skill 目录
+ *   skill:list-trusted      — 获取永久信任工具列表
+ *   skill:untrust           — 撤销某工具的永久信任
  */
 import { ipcMain, shell, app } from 'electron';
 import * as path from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import type { SkillRegistry } from './skill-registry';
-import { readSkillConfig, toggleSkill } from './skill-config';
+import {
+  readSkillConfig,
+  toggleSkill,
+  removeTrustedTool,
+} from './skill-config';
 import { createLogger } from '../logger';
 
 const log = createLogger('Skill-IPC');
@@ -44,7 +48,6 @@ export function registerSkillHandlers(registry: SkillRegistry): void {
   );
 
   // ── skill:open-dir ────────────────────────────────────
-  // 在资源管理器中打开用户 Skill 目录（如目录不存在则先创建）
   ipcMain.handle('skill:open-dir', async () => {
     const userSkillsDir = path.join(app.getPath('userData'), 'skills');
     if (!existsSync(userSkillsDir)) {
@@ -54,11 +57,25 @@ export function registerSkillHandlers(registry: SkillRegistry): void {
     log.info(`打开 Skill 目录: ${userSkillsDir}`);
   });
 
+  // ── skill:list-trusted ────────────────────────────────
+  ipcMain.handle('skill:list-trusted', async () => {
+    if (!registryRef) return [];
+    return registryRef.getTrustedToolDetails();
+  });
+
+  // ── skill:untrust ─────────────────────────────────────
+  ipcMain.handle('skill:untrust', async (_e, toolName: string) => {
+    if (!registryRef) return;
+    registryRef.removeTrustedTool(toolName);
+    await removeTrustedTool(toolName);
+    log.info(`已撤销工具 "${toolName}" 的永久信任`);
+  });
+
   log.info('Skill IPC handlers 已注册');
 }
 
 /**
- * 初始化 Skill 系统：加载所有 Skill + 应用禁用列表 + 注册 IPC
+ * 初始化 Skill 系统：加载所有 Skill + 应用禁用列表 + 应用信任列表 + 注册 IPC
  */
 export async function initializeSkillSystem(
   registry: SkillRegistry
@@ -72,12 +89,18 @@ export async function initializeSkillSystem(
     registry.register(skill);
   }
 
-  // 应用禁用列表
+  // 应用禁用列表 + 信任列表
   const config = await readSkillConfig();
   if (config.disabled.length > 0) {
     registry.applyDisabledList(config.disabled);
   }
+  if (config.trustedTools.length > 0) {
+    registry.applyTrustedList(config.trustedTools);
+  }
 
   registerSkillHandlers(registry);
-  log.info(`Skill 系统初始化完成: ${registry.size} 个 Skill 已加载`);
+  log.info(
+    `Skill 系统初始化完成: ${registry.size} 个 Skill, ` +
+      `已信任 ${config.trustedTools.length} 个工具`
+  );
 }

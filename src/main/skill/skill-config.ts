@@ -1,12 +1,12 @@
 /**
- * SkillConfig — Skill 启用/禁用配置持久化
+ * SkillConfig — Skill 启用/禁用 + 信任工具 配置持久化
  *
  * 存储在 userData/skill-config.json
- * 格式: { disabled: string[] }
+ * 格式: { disabled: string[], trustedTools: string[] }
  *
  * 语义说明：
- * - 是否使用联网搜索完全由对应 Skill（web-search）的启用状态决定
- * - 禁用 Skill ⇒ chat-engine 不会把其工具传给 LLM
+ * - disabled: 被禁用的 Skill 名称（黑名单模式，默认全部启用）
+ * - trustedTools: 被用户永久信任的 MODERATE 工具名称（免确认）
  */
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
@@ -17,8 +17,10 @@ import { createLogger } from '../logger';
 const log = createLogger('SkillConfig');
 
 interface SkillConfigData {
-  /** 被禁用的 Skill 名称列表（黑名单模式：默认全部启用） */
+  /** 被禁用的 Skill 名称列表 */
   disabled: string[];
+  /** 被用户永久信任的工具名称列表 */
+  trustedTools: string[];
 }
 
 function getConfigPath(): string {
@@ -27,6 +29,7 @@ function getConfigPath(): string {
 
 const DEFAULT_CONFIG: SkillConfigData = {
   disabled: [],
+  trustedTools: [],
 };
 
 export async function readSkillConfig(): Promise<SkillConfigData> {
@@ -37,6 +40,7 @@ export async function readSkillConfig(): Promise<SkillConfigData> {
     const data = JSON.parse(raw) as Partial<SkillConfigData>;
     return {
       disabled: data.disabled ?? [],
+      trustedTools: data.trustedTools ?? [],
     };
   } catch (err) {
     log.warn('读取 skill-config.json 失败，使用默认配置:', err);
@@ -71,5 +75,21 @@ export async function toggleSkill(
       config.disabled.push(name);
     }
   }
+  await writeSkillConfig(config);
+}
+
+/** 添加永久信任的工具 */
+export async function addTrustedTool(toolName: string): Promise<void> {
+  const config = await readSkillConfig();
+  if (!config.trustedTools.includes(toolName)) {
+    config.trustedTools.push(toolName);
+    await writeSkillConfig(config);
+  }
+}
+
+/** 移除永久信任的工具 */
+export async function removeTrustedTool(toolName: string): Promise<void> {
+  const config = await readSkillConfig();
+  config.trustedTools = config.trustedTools.filter((n) => n !== toolName);
   await writeSkillConfig(config);
 }

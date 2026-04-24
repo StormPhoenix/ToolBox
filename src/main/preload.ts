@@ -102,6 +102,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chatAbort: (requestId: string) =>
     ipcRenderer.invoke('chat:abort', requestId),
 
+  chatConfirmResponse: (input: unknown) =>
+    ipcRenderer.invoke('chat:confirm-response', input),
+
   chatResendImageRef: (ref: unknown) =>
     ipcRenderer.invoke('chat:resend-image-ref', ref),
 
@@ -133,4 +136,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   skillOpenDir: () =>
     ipcRenderer.invoke('skill:open-dir'),
+
+  skillListTrusted: () =>
+    ipcRenderer.invoke('skill:list-trusted'),
+
+  skillUntrust: (toolName: string) =>
+    ipcRenderer.invoke('skill:untrust', toolName),
 });

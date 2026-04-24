@@ -35,6 +35,8 @@ export class SkillRegistry {
   > = new Map();
   /** 被禁用的 Skill 名称集合 */
   private disabledSkills: Set<string> = new Set();
+  /** 被用户永久信任的 MODERATE 工具名称集合（免确认） */
+  private trustedTools: Set<string> = new Set();
 
   // ─── 注册 / 注销 ──────────────────────────────────────
 
@@ -105,6 +107,97 @@ export class SkillRegistry {
   /** 获取所有已注册的工具名 */
   getToolNames(): string[] {
     return Array.from(this.toolIndex.keys());
+  }
+
+  // ─── 确认机制 ───────────────────────────────────────
+
+  /**
+   * 获取工具的风险级别。
+   * 工具不存在或禁用时返回 undefined。
+   */
+  getToolRiskLevel(toolName: string): 'SAFE' | 'MODERATE' | undefined {
+    const entry = this.toolIndex.get(toolName);
+    if (!entry) return undefined;
+    if (this.disabledSkills.has(entry.skill.name)) return undefined;
+    return entry.tool.riskLevel;
+  }
+
+  /**
+   * 检查工具是否需要用户确认。
+   *
+   * 规则：
+   * - SAFE 级别永不需要确认
+   * - MODERATE 级别需要确认，除非已在 trustedTools 中
+   */
+  requiresConfirmation(toolName: string): boolean {
+    const level = this.getToolRiskLevel(toolName);
+    if (level !== 'MODERATE') return false;
+    return !this.trustedTools.has(toolName);
+  }
+
+  /**
+   * 获取工具的确认弹窗操作描述（渲染 confirmHint 模板）。
+   *
+   * confirmHint 中的 {paramName} 会被替换为工具输入参数的实际值。
+   * 未设置 confirmHint 时返回 undefined，前端可回退到 displayName 兜底。
+   */
+  getToolConfirmHint(
+    toolName: string,
+    toolInput?: Record<string, unknown>
+  ): string | undefined {
+    const entry = this.toolIndex.get(toolName);
+    const hint = entry?.tool.confirmHint;
+    if (!hint) return undefined;
+
+    // 替换 {paramName} 占位符为实际值
+    return hint.replace(/\{(\w+)\}/g, (_, key: string) => {
+      const value = toolInput?.[key];
+      if (value === undefined || value === null) return '';
+      if (typeof value === 'string') return value;
+      if (Array.isArray(value)) return `${value.length} 项`;
+      return JSON.stringify(value);
+    });
+  }
+
+  // ─── 信任管理 ──────────────────────────────────────
+
+  /** 应用永久信任工具列表（启动时调用） */
+  applyTrustedList(toolNames: string[]): void {
+    this.trustedTools = new Set(toolNames);
+  }
+
+  /** 添加永久信任的工具 */
+  addTrustedTool(toolName: string): void {
+    this.trustedTools.add(toolName);
+    log.info(`工具 "${toolName}" 已加入永久信任列表`);
+  }
+
+  /** 移除永久信任的工具 */
+  removeTrustedTool(toolName: string): void {
+    this.trustedTools.delete(toolName);
+    log.info(`工具 "${toolName}" 已从永久信任列表移除`);
+  }
+
+  /** 获取所有永久信任工具的详细信息（UI 用） */
+  getTrustedToolDetails(): Array<{
+    toolName: string;
+    displayName: string;
+    skillName: string;
+  }> {
+    const result: Array<{
+      toolName: string;
+      displayName: string;
+      skillName: string;
+    }> = [];
+    for (const tn of this.trustedTools) {
+      const entry = this.toolIndex.get(tn);
+      result.push({
+        toolName: tn,
+        displayName: entry?.tool.displayName || tn,
+        skillName: entry?.skill.name || 'unknown',
+      });
+    }
+    return result;
   }
 
   // ─── System Prompt 构建 ────────────────────────────

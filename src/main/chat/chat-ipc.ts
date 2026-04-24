@@ -127,6 +127,22 @@ export function registerChatHandlers(): void {
     engine.abortRequest(requestId);
   });
 
+  // ── chat:confirm-response ───────────────────────────────
+  // 用户响应 tool-confirm-request 事件（点击 批准/拒绝/全部批准/永久信任）
+  ipcMain.handle(
+    'chat:confirm-response',
+    async (
+      _e,
+      input: {
+        confirmId: string;
+        decision: 'approved' | 'approved-all' | 'trusted' | 'rejected';
+      }
+    ): Promise<void> => {
+      if (!input?.confirmId) throw new Error('缺少 confirmId');
+      engine.resolveConfirmation(input.confirmId, input.decision);
+    }
+  );
+
   // ── chat:resend-image-ref ───────────────────────────────
   // UI 点击历史气泡"重新发送此图" → 读取 cachePath → 返回 base64 给 Composer
   ipcMain.handle(

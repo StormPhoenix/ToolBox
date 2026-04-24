@@ -134,6 +134,21 @@ export type ChatEvent =
       summary: string;
     }
   | {
+      /**
+       * 工具执行前请求用户确认（MODERATE 级别且未永久信任）。
+       * 渲染进程收到后弹出确认对话框，用户响应通过 chat:confirm-response IPC 回传。
+       */
+      kind: 'tool-confirm-request';
+      requestId: string;
+      /** 唯一确认 ID（用于匹配响应） */
+      confirmId: string;
+      toolName: string;
+      toolDisplayName: string;
+      toolInput: unknown;
+      /** 渲染后的确认提示文本（已替换 {paramName}），未设置时前端用 displayName 兜底 */
+      confirmHint?: string;
+    }
+  | {
       kind: 'error';
       requestId: string;
       message: string;

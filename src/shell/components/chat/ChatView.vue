@@ -115,6 +115,12 @@
       @close="lightboxState = null"
     />
 
+    <!-- 工具确认对话框（MODERATE 工具调用前弹出） -->
+    <ConfirmDialog
+      :confirm="pendingConfirm"
+      @respond="respondConfirm"
+    />
+
     <!-- 轻量 toast -->
     <transition name="toast">
       <div v-if="toast" class="toast" :class="`toast-${toast.kind}`">
@@ -145,6 +151,7 @@ import MessageList from './MessageList.vue';
 import Composer from './Composer.vue';
 import SelectionToolbar from './SelectionToolbar.vue';
 import ImageLightbox, { type LightboxItem } from './ImageLightbox.vue';
+import ConfirmDialog from './ConfirmDialog.vue';
 import { useChat } from '../../composables/useChat';
 
 defineEmits<{
@@ -161,6 +168,7 @@ const {
   // tool call state
   toolExecuting,
   toolResults,
+  pendingConfirm,
   // selection
   selectionMode,
   selectedIds,
@@ -173,6 +181,7 @@ const {
   clearContext,
   sendMessage,
   abort,
+  respondConfirm,
   dismissError,
   enterSelection,
   exitSelection,

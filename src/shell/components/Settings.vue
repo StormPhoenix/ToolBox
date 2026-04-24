@@ -213,6 +213,32 @@
           </div>
         </div>
 
+        <!-- 已永久信任的工具（有信任项时显示，可折叠） -->
+        <details v-if="trustedTools.length > 0" class="trusted-section">
+          <summary class="trusted-summary">
+            已永久信任的工具（{{ trustedTools.length }}）
+          </summary>
+          <div class="trusted-list">
+            <div
+              v-for="item in trustedTools"
+              :key="item.toolName"
+              class="trusted-row"
+            >
+              <div class="trusted-info">
+                <span class="trusted-name">{{ item.displayName }}</span>
+                <span class="trusted-meta">· {{ item.skillName }} · {{ item.toolName }}</span>
+              </div>
+              <button
+                class="btn-untrust"
+                @click="onUntrust(item.toolName)"
+                title="撤销永久信任，下次调用会重新询问"
+              >
+                撤销
+              </button>
+            </div>
+          </div>
+        </details>
+
         <!-- Skill 操作提示 -->
         <Transition name="fade">
           <div v-if="skillToast" class="test-result ok">
@@ -227,7 +253,12 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, watch, onMounted } from 'vue';
-import type { LLMProviderType, LLMConfigInput, SkillListItem } from '@toolbox/bridge';
+import type {
+  LLMProviderType,
+  LLMConfigInput,
+  SkillListItem,
+  TrustedToolItem,
+} from '@toolbox/bridge';
 
 interface ProviderFormItem {
   apiKey: string;
@@ -445,6 +476,9 @@ const skillsLoading = ref(false);
 const skillToast = ref<string | null>(null);
 let skillToastTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** 已永久信任的工具列表 */
+const trustedTools = ref<TrustedToolItem[]>([]);
+
 async function reloadSkills(): Promise<void> {
   skillsLoading.value = true;
   try {
@@ -453,6 +487,14 @@ async function reloadSkills(): Promise<void> {
     skills.value = [];
   } finally {
     skillsLoading.value = false;
+  }
+}
+
+async function reloadTrustedTools(): Promise<void> {
+  try {
+    trustedTools.value = await window.electronAPI.skillListTrusted();
+  } catch {
+    trustedTools.value = [];
   }
 }
 
@@ -487,6 +529,18 @@ async function onOpenSkillDir(): Promise<void> {
   }
 }
 
+async function onUntrust(toolName: string): Promise<void> {
+  try {
+    await window.electronAPI.skillUntrust(toolName);
+    trustedTools.value = trustedTools.value.filter(
+      (t) => t.toolName !== toolName
+    );
+    showSkillToast(`已撤销 ${toolName} 的永久信任`);
+  } catch (err) {
+    showSkillToast(`撤销失败: ${(err as Error).message}`);
+  }
+}
+
 function showSkillToast(msg: string): void {
   skillToast.value = msg;
   if (skillToastTimer) clearTimeout(skillToastTimer);
@@ -497,6 +551,7 @@ function showSkillToast(msg: string): void {
 
 onMounted(() => {
   void reloadSkills();
+  void reloadTrustedTools();
 });
 </script>
 
@@ -938,5 +993,81 @@ onMounted(() => {
 .tooltip-wrapper:hover .tooltip-content {
   opacity: 1;
   pointer-events: auto;
+}
+
+/* ── 永久信任工具列表 ── */
+.trusted-section {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 8px;
+}
+
+.trusted-summary {
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  user-select: none;
+  padding: 4px 0;
+  outline: none;
+}
+
+.trusted-summary:hover {
+  color: var(--text-primary);
+}
+
+.trusted-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.trusted-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-content);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.trusted-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.trusted-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.trusted-meta {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-family: 'Menlo', 'Consolas', monospace;
+}
+
+.btn-untrust {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.btn-untrust:hover {
+  background: var(--bg-card-hover);
+  color: var(--danger, #c44);
+  border-color: var(--danger, #c44);
 }
 </style>

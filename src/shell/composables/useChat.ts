@@ -47,6 +47,15 @@ const toolResults = ref<Array<{
   summary: string;
 }>>([]);
 
+/** 等待用户响应的工具确认请求（同一时间最多一个） */
+const pendingConfirm = ref<{
+  confirmId: string;
+  toolName: string;
+  toolDisplayName: string;
+  toolInput: unknown;
+  confirmHint?: string;
+} | null>(null);
+
 // 选择态
 const selectionMode = ref<boolean>(false);
 const selectedIds = ref<Set<string>>(new Set());
@@ -94,12 +103,23 @@ function handleChatEvent(event: ChatEvent): void {
       ];
       break;
 
+    case 'tool-confirm-request':
+      pendingConfirm.value = {
+        confirmId: event.confirmId,
+        toolName: event.toolName,
+        toolDisplayName: event.toolDisplayName,
+        toolInput: event.toolInput,
+        confirmHint: event.confirmHint,
+      };
+      break;
+
     case 'stream-end': {
       streamingText.value = '';
       currentRequestId.value = null;
       lastError.value = null;
       toolExecuting.value = null;
       toolResults.value = [];
+      pendingConfirm.value = null;
       // 从主进程重新加载会话：把乐观版本的 image 块替换为已落盘的 image_ref
       // 同时追加刚生成的 assistant 消息（主进程已持久化）
       if (activeSession.value) {
@@ -121,6 +141,7 @@ function handleChatEvent(event: ChatEvent): void {
       currentRequestId.value = null;
       toolExecuting.value = null;
       toolResults.value = [];
+      pendingConfirm.value = null;
       // 错误后也重新加载一次：主进程可能已剥离图片引用
       if (activeSession.value) {
         const id = activeSession.value.id;
@@ -137,6 +158,7 @@ function handleChatEvent(event: ChatEvent): void {
       currentRequestId.value = null;
       toolExecuting.value = null;
       toolResults.value = [];
+      pendingConfirm.value = null;
       break;
   }
 }
@@ -291,6 +313,31 @@ async function abort(): Promise<void> {
   if (!currentRequestId.value) return;
   await window.electronAPI.chatAbort(currentRequestId.value);
   // 具体状态清理由 aborted 事件处理
+}
+
+/**
+ * 响应工具确认请求。
+ * decision:
+ *   - 'approved': 本次批准
+ *   - 'approved-all': 本次请求内全部批准
+ *   - 'trusted': 永久信任
+ *   - 'rejected': 拒绝
+ */
+async function respondConfirm(
+  decision: 'approved' | 'approved-all' | 'trusted' | 'rejected'
+): Promise<void> {
+  const current = pendingConfirm.value;
+  if (!current) return;
+  // 立即清空本地状态（关闭弹窗），主进程收到后会继续 agent 循环
+  pendingConfirm.value = null;
+  try {
+    await window.electronAPI.chatConfirmResponse({
+      confirmId: current.confirmId,
+      decision,
+    });
+  } catch (err) {
+    lastError.value = (err as Error).message;
+  }
 }
 
 function dismissError(): void {
@@ -527,6 +574,7 @@ export function useChat() {
     // tool call state
     toolExecuting,
     toolResults,
+    pendingConfirm,
 
     // selection state
     selectionMode,
@@ -542,6 +590,7 @@ export function useChat() {
     clearContext,
     sendMessage,
     abort,
+    respondConfirm,
     dismissError,
 
     // selection actions

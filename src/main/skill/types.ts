@@ -57,10 +57,17 @@ export interface SkillToolManifest {
     properties: Record<string, unknown>;
     required: string[];
   };
-  /** 风险级别（V1 仅支持 SAFE） */
-  riskLevel?: 'SAFE' | 'MODERATE' | 'DANGEROUS';
+  /** 风险级别：MODERATE 需要用户确认 */
+  riskLevel?: 'SAFE' | 'MODERATE';
   /** 对应的脚本入口（相对于 Skill 目录的路径） */
   scriptEntry?: string;
+  /**
+   * 确认弹窗中展示给用户的操作描述模板。
+   * 支持 {paramName} 语法引用工具输入参数，渲染时自动替换。
+   * 例如: "移动: {source} → {destination}"
+   * 未设置时使用 displayName 作为兜底描述。
+   */
+  confirmHint?: string;
 }
 
 // ─── Skill 运行时上下文 ───────────────────────────────────
@@ -100,7 +107,12 @@ export interface SkillToolDefinition {
     required: string[];
   };
   /** 风险级别 */
-  riskLevel: 'SAFE' | 'MODERATE' | 'DANGEROUS';
+  riskLevel: 'SAFE' | 'MODERATE';
+  /**
+   * 确认弹窗中展示给用户的操作描述模板。
+   * 支持 {paramName} 语法引用工具输入参数。
+   */
+  confirmHint?: string;
   /** 工具执行函数 */
   execute: (
     input: Record<string, unknown>,

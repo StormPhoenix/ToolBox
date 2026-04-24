@@ -39,6 +39,7 @@ import {
   type LLMImageRefBlock,
 } from './image-cache';
 import type { SkillRegistry } from '../skill/skill-registry';
+import { addTrustedTool as addTrustedToolConfig } from '../skill/skill-config';
 import { createLogger } from '../logger';
 
 const log = createLogger('ChatEngine');
@@ -117,6 +118,39 @@ export function abortRequest(requestId: string): void {
       return;
     }
   }
+}
+
+// ─── 工具确认请求管理 ────────────────────────────────────
+
+/** 用户对单次确认的响应类型 */
+export type ConfirmDecision = 'approved' | 'approved-all' | 'trusted' | 'rejected';
+
+interface PendingConfirmation {
+  resolve: (decision: ConfirmDecision) => void;
+  /** 用于在 abort / 窗口关闭时统一取消 */
+  signal: AbortSignal;
+  onAbort: () => void;
+}
+
+/** confirmId → PendingConfirmation */
+const pendingConfirmations = new Map<string, PendingConfirmation>();
+
+/**
+ * 由 chat-ipc 在收到 chat:confirm-response 时调用，
+ * 唤醒被阻塞的 agent 循环。
+ */
+export function resolveConfirmation(
+  confirmId: string,
+  decision: ConfirmDecision
+): void {
+  const pending = pendingConfirmations.get(confirmId);
+  if (!pending) {
+    log.warn(`resolveConfirmation: confirmId=${confirmId} 不存在（可能已超时/被 abort）`);
+    return;
+  }
+  pendingConfirmations.delete(confirmId);
+  pending.signal.removeEventListener('abort', pending.onAbort);
+  pending.resolve(decision);
 }
 
 // ─── 类型辅助 ──────────────────────────────────────────────
@@ -598,6 +632,8 @@ async function runStream(params: {
 
   // 中间步骤消息，最终一次性持久化
   const pendingMessages: ChatMessage[] = [];
+  // 本次请求中用户已"全部批准"的工具集合（限本次请求周期）
+  const approvedAllTools = new Set<string>();
   let iter = 0;
 
   const cancelStallWarn = startStallWarning('LLM 流式', requestId);
@@ -718,6 +754,87 @@ async function runStream(params: {
 
         for (const toolCall of toolUseBlocks) {
           const displayName = registry.getToolDisplayName(toolCall.name);
+
+          // ── 确认拦截：MODERATE 工具且未被信任、未被本轮"全部批准"覆盖 ──
+          if (
+            registry.requiresConfirmation(toolCall.name) &&
+            !approvedAllTools.has(toolCall.name)
+          ) {
+            const confirmId = randomUUID();
+            const confirmHint = registry.getToolConfirmHint(
+              toolCall.name,
+              toolCall.input as Record<string, unknown>
+            );
+
+            onEvent({
+              kind: 'tool-confirm-request',
+              requestId,
+              confirmId,
+              toolName: toolCall.name,
+              toolDisplayName: displayName,
+              toolInput: toolCall.input,
+              confirmHint,
+            });
+
+            // 等待用户响应（可被 abort 打断）
+            const decision = await new Promise<ConfirmDecision>((resolve) => {
+              const onAbort = () => {
+                pendingConfirmations.delete(confirmId);
+                resolve('rejected');
+              };
+              pendingConfirmations.set(confirmId, {
+                resolve,
+                signal: abort.signal,
+                onAbort,
+              });
+              if (abort.signal.aborted) {
+                onAbort();
+              } else {
+                abort.signal.addEventListener('abort', onAbort, { once: true });
+              }
+            });
+
+            if (abort.signal.aborted) {
+              // abort 后不再继续，外层循环会检测
+              return;
+            }
+
+            if (decision === 'rejected') {
+              // 回注拒绝结果，让 LLM 知道用户没同意
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolCall.id,
+                content: '用户拒绝了此操作',
+                is_error: true,
+              });
+              onEvent({
+                kind: 'tool-done',
+                requestId,
+                toolName: toolCall.name,
+                toolDisplayName: displayName,
+                success: false,
+                summary: '用户拒绝了此操作',
+              });
+              continue;
+            }
+
+            if (decision === 'approved-all') {
+              // 本次请求内同名工具免确认
+              approvedAllTools.add(toolCall.name);
+              // 同时把当前已注册的其他 MODERATE 工具也加入（像外部项目那样）
+              for (const tn of registry.getToolNames()) {
+                if (registry.requiresConfirmation(tn)) {
+                  approvedAllTools.add(tn);
+                }
+              }
+            } else if (decision === 'trusted') {
+              // 永久信任：写入 Registry + 持久化
+              registry.addTrustedTool(toolCall.name);
+              void addTrustedToolConfig(toolCall.name);
+            }
+            // 'approved' 继续执行，本次放行
+          }
+
           onEvent({
             kind: 'tool-executing',
             requestId,

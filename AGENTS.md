@@ -57,6 +57,24 @@ ToolBox/
 │   │           ├── bicubic.ts        # 双三次
 │   │           ├── lanczos.ts        # Lanczos3（默认）
 │   │           └── llm-upscale.ts    # 【TODO V2】LLM 超分 Provider 骨架
+│   │   └── skill/                    # Skill 框架（LLM 工具调用能力扩展）
+│   │       ├── types.ts              # SkillManifest / SkillToolDefinition / SkillContext 类型
+│   │       ├── skill-loader.ts       # SKILL.md 解析 + 目录扫描 + .cjs 脚本动态 require
+│   │       ├── skill-registry.ts     # 单例注册表 + 执行路由 + 风险判断 + 信任管理
+│   │       ├── skill-config.ts       # userData/skill-config.json 读写（disabled + trustedTools）
+│   │       ├── skill-ipc.ts          # IPC handlers + initializeSkillSystem
+│   │       └── builtin-skills/       # 11 个内置 Skill（构建时由 copy-skills 拷贝到 dist）
+│   │           ├── web-search/       # 🔍 DuckDuckGo 联网搜索
+│   │           ├── quick-calc/       # 🔢 数学/单位/日期计算
+│   │           ├── text-transform/   # 🔤 JSON/Base64/哈希/UUID 等文本处理
+│   │           ├── clipboard-ops/    # 📋 剪贴板读写
+│   │           ├── system-info/      # 💻 时间/OS/内存查询
+│   │           ├── file-ops/         # 📂 文件系统只读（6 个工具）
+│   │           ├── safe-desktop/     # 🔔 打开网页/目录/通知（5 个工具，SAFE）
+│   │           ├── file-download/    # ⬇️ 下载文件到 Downloads
+│   │           ├── file-write/       # ✏️ 文件写入/删除/移动/批量（MODERATE）
+│   │           ├── desktop-action/   # 🖥️ 启动本地应用（MODERATE）
+│   │           └── run-script/       # ⚡ 执行 AI 生成脚本（MODERATE）
 │   ├── renderer/                     # 启动页（Splash Screen）
 │   │   ├── splash.html               # 启动页 HTML
 │   │   └── splash.css                # 启动页样式
@@ -191,7 +209,22 @@ plugins/
 4. **webview 路径**：`../../plugins/builtin/<id>/dist/<entry>`（相对于 `dist/shell/index.html`）
 5. **preload 注入**：`ToolViewer` 通过 `get-preload-path` IPC 获取 preload 绝对路径，设置到 `<webview preload="...">` 属性，插件内 `window.electronAPI` 直接可用
 
-### 3.4 Electron 安全规则（强制）
+### 3.4 Skill 系统（LLM 工具扩展）
+
+Skill 是为 LLM Chat 对话提供**工具调用能力**的声明式扩展机制。每个 Skill = 一个目录 + `SKILL.md`（frontmatter 元数据 + Markdown 指令）+ 可选的 `scripts/*.cjs` 执行脚本。
+
+**核心特性：**
+
+- **声明式工具**：通过 YAML frontmatter 定义工具的 `name` / `description` / `inputSchema` / `riskLevel` / `confirmHint`
+- **两级风险体系**：`SAFE`（无副作用，直接执行）/ `MODERATE`（有副作用，弹窗确认）
+- **Agent 循环**：Chat Engine 在 `tool_use` 响应后自动路由到 SkillRegistry 执行，支持最多 5 轮迭代
+- **永久信任**：用户可对 MODERATE 工具点"永久信任"，后续免确认（Settings 可撤销）
+- **零 npm 依赖**：内置 Skill 脚本只能用 Electron / Node 内置模块
+- **用户级 Skill**：放入 `userData/skills/` 下，重启应用自动加载，可覆盖同名内置 Skill
+
+**11 个内置 Skill** 共 27 个工具，覆盖搜索、计算、文本处理、剪贴板、文件读写、应用启动、脚本执行等能力。详细清单、SKILL.md 规范、确认流程、打包策略详见 [`docs/tech/skill-system.md`](docs/tech/skill-system.md)。
+
+### 3.5 Electron 安全规则（强制）
 
 - `nodeIntegration: false`、`contextIsolation: true` — 所有窗口必须
 - 跨进程通信 **只能** 通过 `contextBridge` + `ipcMain.handle` / `ipcRenderer.invoke`
@@ -239,7 +272,13 @@ plugins/
 | `chatExportSelected(input)` | `chat:export-selected` | 把选中的消息合并导出为 Markdown 文件；在 targetPath 同级创建 `<stem>/` 子目录，写入 `.md` 和 `images/` 子目录 |
 | `chatRegenerate(input)` | `chat:regenerate` | 重新生成指定 assistant 消息：截断该消息（含）及后续所有消息，基于截断后上下文重新调用 LLM 流式生成 |
 | `chatEditAndResend(input)` | `chat:edit-and-resend` | 编辑某条 user 消息并重发：截断该消息（含）及后续所有消息，用修改后文本 + 原图片引用构造新 user 消息并流式生成 |
-| `onChatEvent(cb)` | `chat:event`（push） | 订阅 Chat 事件流（`stream-chunk` / `stream-end` / `error` / `aborted`），返回 dispose 函数 |
+| `chatConfirmResponse(input)` | `chat:confirm-response` | 响应工具确认请求（对 `tool-confirm-request` 事件的回复）。`decision`: `approved` \| `approved-all` \| `trusted` \| `rejected` |
+| `onChatEvent(cb)` | `chat:event`（push） | 订阅 Chat 事件流（`stream-chunk` / `stream-end` / `stream-reset` / `tool-executing` / `tool-done` / `tool-confirm-request` / `error` / `aborted`），返回 dispose 函数 |
+| `skillList()` | `skill:list` | 获取所有 Skill 状态列表（`name` / `description` / `emoji` / `builtin` / `enabled` / `toolCount`） |
+| `skillToggle(name, enabled)` | `skill:toggle` | 启用/禁用指定 Skill；禁用后其工具立即从 LLM tools 参数中移除 |
+| `skillOpenDir()` | `skill:open-dir` | 在资源管理器中打开用户 Skill 目录 `userData/skills/`（不存在时自动创建） |
+| `skillListTrusted()` | `skill:list-trusted` | 获取所有永久信任工具列表（含 toolName / displayName / skillName） |
+| `skillUntrust(toolName)` | `skill:untrust` | 撤销某工具的永久信任，下次调用会重新弹窗 |
 
 **新增 IPC 通道三步骤：**
 1. `src/main/main.ts` — `ipcMain.handle('channel', handler)`
@@ -261,10 +300,11 @@ plugins/
 |------|------|
 | `pnpm install` | 安装所有依赖（含 workspace 插件） |
 | `pnpm build:main` | Vite 构建主进程 + preload → `dist/main/` |
+| `pnpm build:skills` | 拷贝 `src/main/skill/builtin-skills/` 到 `dist/main/skill/builtin-skills/`（`.cjs` 原样拷贝，不走 Vite 打包） |
 | `pnpm build:shell` | Vite 构建 Shell → `dist/shell/` |
 | `pnpm build:plugins` | 构建所有插件 → 各插件 `dist/` |
 | `pnpm build:registry` | 生成 `dist/plugin-registry.json` |
-| `pnpm build` | 全量构建（上述四步顺序执行） |
+| `pnpm build` | 全量构建（上述五步顺序执行） |
 | `pnpm start` | 全量构建 + 启动 Electron |
 | `pnpm dev:main` | Vite watch 模式构建主进程（热重编译） |
 | `pnpm dev:shell` | Vite dev server（Shell，端口 5173） |
@@ -285,6 +325,16 @@ plugins/
 6. 创建 `src/index.html`、`src/main.ts`、`src/App.vue`
 7. 运行 `pnpm install` 注册到 workspace（同时建立 `@toolbox/bridge` link）
 8. 运行 `pnpm build:plugins && pnpm build:registry` 更新注册表
+
+### 5.4 新增 Skill 步骤
+
+1. 创建目录：`src/main/skill/builtin-skills/<skill-name>/`
+2. 创建 `SKILL.md`（YAML frontmatter + Markdown body，参考 [`docs/tech/skill-system.md §2`](docs/tech/skill-system.md)）
+3. 创建 `scripts/<name>.cjs`（导出 `execute(input, context)` 函数，禁止 require 第三方 npm 包）
+4. 运行 `pnpm build:skills` 拷贝到 dist
+5. 重启应用 → Settings → 技能扩展 会自动列出新 Skill
+
+**用户级 Skill** 直接放到 `userData/skills/<skill-name>/`，重启应用后自动加载（Settings → 打开技能目录可快速访问）。
 
 **在插件中调用系统能力：**
 
@@ -415,6 +465,7 @@ const msg = buildMultiImageMessage(
 | `docs/design/image-resize-plugin-design.md` | 需求/设计 | 图像分辨率调整插件功能规格、Resize Provider 架构、IPC 扩展方案 |
 | `docs/design/llm-chat-design.md` | 需求/设计 | LLM Chat 对话功能（V1 纯对话）：引擎架构、IPC、UI 布局 |
 | `docs/tech/llm-framework.md` | 技术 | LLM 框架架构、Provider 配置、插件调用指南 |
+| `docs/tech/skill-system.md` | 技术 | Skill 系统架构：SKILL.md 规范、11 个内置 Skill、两级风险体系、确认弹窗、打包策略 |
 
 > 新增文档后请在此表登记。
 
@@ -477,6 +528,8 @@ const msg = buildMultiImageMessage(
 - ❌ 绕过 `contextBridge` 直接在渲染进程使用 Node.js
 - ❌ 修改 `pnpm-lock.yaml`（除非刻意升级依赖）
 - ❌ 删除 `.codebuddy/` 目录
+- ❌ **内置 Skill 脚本（`src/main/skill/builtin-skills/**/*.cjs`）禁止 `require` 第三方 npm 包**，只能用 `electron` 和 Node 内置模块
+- ❌ 跳过 `pnpm build:skills` — 修改 SKILL.md 或 .cjs 脚本后必须运行此命令，否则 `dist/main/skill/builtin-skills/` 不更新，运行时仍是旧版本
 
 ## 10. 重要提醒
 
@@ -490,3 +543,6 @@ const msg = buildMultiImageMessage(
 - ⚠️ **`ElectronAPI` 接口的唯一来源是 `plugins/shared/bridge/src/types.ts`** — 禁止在其他位置重复定义，`src/shell/types/global.d.ts` 只做 re-export
 - ⚠️ **新增 IPC 方法后只需更新 `types.ts`**，`index.ts` 的 Proxy 会自动透传，无需手动添加
 - ⚠️ **preload 中所有 `ElectronAPI` 方法必须返回 `Promise`** — 包括同步实现也需包为 `Promise.resolve(...)`，以保证签名一致性
+- ⚠️ **Skill 系统在 `app.whenReady()` 时初始化**：`main.ts` 创建 `SkillRegistry` 并通过 `setSharedSkillRegistry()` 注入给 chat-engine；`initializeSkillSystem()` 负责扫描内置 + 用户目录、应用 `disabled`/`trustedTools` 配置、注册 IPC
+- ⚠️ **Skill `.cjs` 脚本必须解包**：`electron-builder.json5` 的 `asarUnpack` 已包含 `dist/main/skill/builtin-skills/**/*`，生产环境从 `process.resourcesPath/app.asar.unpacked/...` 加载
+- ⚠️ **MODERATE 工具的确认拦截在 chat-engine 中实现**：通过 `pendingConfirmations` Map + `resolveConfirmation()` 函数串联 IPC 往返；用户点"永久信任"时会同时写入 Registry 内存和 `skill-config.json`

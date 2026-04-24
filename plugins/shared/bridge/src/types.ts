@@ -512,6 +512,16 @@ export type ChatEvent =
       success: boolean;
       summary: string;
     }
+  | {
+      /** 工具执行前请求用户确认（MODERATE 级别且未永久信任） */
+      kind: 'tool-confirm-request';
+      requestId: string;
+      confirmId: string;
+      toolName: string;
+      toolDisplayName: string;
+      toolInput: unknown;
+      confirmHint?: string;
+    }
   | { kind: 'error'; requestId: string; message: string; recoverable: boolean }
   | { kind: 'aborted'; requestId: string };
 
@@ -695,6 +705,20 @@ export interface ElectronAPI {
   chatAbort(requestId: string): Promise<void>;
 
   /**
+   * 响应工具确认请求（对 tool-confirm-request 事件的回复）。
+   *
+   * decision:
+   *   - 'approved': 本次批准，仅此次调用放行
+   *   - 'approved-all': 全部批准，本次用户请求内所有 MODERATE 工具放行
+   *   - 'trusted': 永久信任，写入配置后续免确认
+   *   - 'rejected': 拒绝，工具返回"用户拒绝了此操作"
+   */
+  chatConfirmResponse(input: {
+    confirmId: string;
+    decision: 'approved' | 'approved-all' | 'trusted' | 'rejected';
+  }): Promise<void>;
+
+  /**
    * 基于历史 imageRef 读取缓存文件内容，返回 ChatAttachmentInput。
    * UI 点击消息气泡"重新发送此图"时调用，得到 base64 后塞入当前 Composer 附件列表。
    * 返回 null 表示缓存文件已丢失。
@@ -742,6 +766,12 @@ export interface ElectronAPI {
 
   /** 在资源管理器中打开用户 Skill 目录（不存在时自动创建） */
   skillOpenDir(): Promise<void>;
+
+  /** 获取所有永久信任的工具列表 */
+  skillListTrusted(): Promise<TrustedToolItem[]>;
+
+  /** 撤销某工具的永久信任 */
+  skillUntrust(toolName: string): Promise<void>;
 }
 
 // ── Skill 类型 ────────────────────────────────────────────────────────────
@@ -754,4 +784,11 @@ export interface SkillListItem {
   builtin: boolean;
   enabled: boolean;
   toolCount: number;
+}
+
+/** 永久信任工具列表项（UI 用） */
+export interface TrustedToolItem {
+  toolName: string;
+  displayName: string;
+  skillName: string;
 }

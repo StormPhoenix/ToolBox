@@ -281,12 +281,23 @@ async function loadSkillTools(
       continue;
     }
 
-    // 兼容 kebab-case 键名
+    // 兼容 kebab-case 键名 + DANGEROUS → MODERATE 归并（V1 两级风险）
+    const rawRiskLevel = (rawTool.riskLevel || (raw['risk-level'] as string)) as
+      | 'SAFE'
+      | 'MODERATE'
+      | 'DANGEROUS'
+      | undefined;
+    const normalizedRisk: 'SAFE' | 'MODERATE' =
+      rawRiskLevel === 'MODERATE' || rawRiskLevel === 'DANGEROUS'
+        ? 'MODERATE'
+        : 'SAFE';
+
     const toolManifest: SkillToolManifest = {
       ...rawTool,
       inputSchema: rawTool.inputSchema || (raw['input-schema'] as SkillToolManifest['inputSchema']),
       scriptEntry: rawTool.scriptEntry || (raw['script-entry'] as string | undefined),
-      riskLevel: rawTool.riskLevel || (raw['risk-level'] as SkillToolManifest['riskLevel']),
+      riskLevel: normalizedRisk,
+      confirmHint: rawTool.confirmHint || (raw['confirm-hint'] as string | undefined),
     };
 
     const execute = await loadToolExecutor(skillDir, toolManifest);
@@ -296,7 +307,8 @@ async function loadSkillTools(
       displayName: toolManifest.displayName,
       description: toolManifest.description,
       inputSchema: toolManifest.inputSchema,
-      riskLevel: toolManifest.riskLevel || 'SAFE',
+      riskLevel: normalizedRisk,
+      confirmHint: toolManifest.confirmHint,
       execute,
     });
   }
