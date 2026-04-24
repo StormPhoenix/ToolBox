@@ -57,12 +57,16 @@
           :error-message="lastError"
           :selection-mode="selectionMode"
           :is-selected="isSelected"
+          :editing-message-id="editingMessageId"
           @dismiss-error="dismissError"
           @resend-image="onResendImage"
           @open-lightbox="onOpenLightbox"
           @toggle-select="onToggleSelect"
           @enter-selection="onEnterSelection"
           @regenerate="onRegenerate"
+          @enter-editing="onEnterEditing"
+          @cancel-editing="onCancelEditing"
+          @submit-edit="onSubmitEdit"
         />
         <!--
           Composer 在选择态下隐藏（v-show 而非 v-if，保活草稿与附件状态）
@@ -171,6 +175,10 @@ const {
   selectAll,
   isSelected,
   regenerateMessage,
+  editingMessageId,
+  enterEditing,
+  exitEditing,
+  submitEdit,
 } = useChat();
 
 // ── LLM 配置状态 ─────────────────────────────────────────
@@ -355,6 +363,22 @@ function onEnterSelection(messageId: string): void {
 
 function onRegenerate(messageId: string): void {
   void regenerateMessage(messageId);
+}
+
+function onEnterEditing(messageId: string): void {
+  enterEditing(messageId);
+}
+
+function onCancelEditing(): void {
+  exitEditing();
+}
+
+function onSubmitEdit(payload: {
+  targetMessageId: string;
+  newText: string;
+  imageRefs: import('@toolbox/bridge').LLMImageRefBlock[];
+}): void {
+  void submitEdit(payload.targetMessageId, payload.newText, payload.imageRefs);
 }
 
 function onToggleSelect(id: string): void {

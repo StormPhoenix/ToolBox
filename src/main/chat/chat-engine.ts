@@ -423,6 +423,93 @@ export async function regenerateMessage(params: {
   return { requestId, discardedCount };
 }
 
+// ─── 编辑并重发 ────────────────────────────────────────────
+
+/**
+ * 编辑某条 user 消息并重发：
+ * 1. 截断从 M（含）到会话末尾的所有消息
+ * 2. 用修改后的文本 + 原 imageRef 构造新 user 消息并持久化
+ * 3. 基于截断后上下文 + 新 user 消息启动流式生成
+ *
+ * imageRef 块直接复用已有缓存，不走压缩管线。
+ */
+export async function editAndResend(params: {
+  sessionId: string;
+  targetMessageId: string;
+  newText: string;
+  imageRefs?: LLMImageRefBlock[];
+  onEvent: ChatEventEmitter;
+}): Promise<{ requestId: string; userMessageId: string; discardedCount: number }> {
+  const { sessionId, targetMessageId, newText, imageRefs, onEvent } = params;
+
+  // 抢占同会话旧请求
+  const existing = activeRequests.get(sessionId);
+  if (existing) {
+    log.info(`editAndResend 抢占旧请求: sessionId=${sessionId}, oldRequestId=${existing.requestId}`);
+    existing.abort.abort();
+    activeRequests.delete(sessionId);
+  }
+
+  const session = await store.loadSession(sessionId);
+  if (!session) throw new Error(`会话不存在: ${sessionId}`);
+
+  const idx = session.messages.findIndex((m) => m.id === targetMessageId);
+  if (idx < 0) throw new Error(`消息不存在: ${targetMessageId}`);
+
+  const discardedCount = session.messages.length - idx;
+  // 截断：只保留 idx 之前的消息
+  session.messages = session.messages.slice(0, idx);
+  await store.saveSession(session);
+
+  // 构造新 user 消息（直接拼 text + imageRef，不走 storeImage 压缩）
+  const hasImages = imageRefs && imageRefs.length > 0;
+  let content: string | PersistedContentBlock[];
+  if (!hasImages) {
+    content = newText;
+  } else {
+    const blocks: PersistedContentBlock[] = [];
+    if (newText.trim()) {
+      blocks.push({ type: 'text', text: newText } as LLMTextBlock);
+    }
+    for (const ref of imageRefs!) {
+      blocks.push(ref);
+    }
+    content = blocks;
+  }
+
+  const userMessage: ChatMessage = {
+    id: randomUUID(),
+    role: 'user',
+    content,
+    timestamp: Date.now(),
+    attachments: hasImages
+      ? imageRefs!.map((r) => ({ name: r.fileName, mediaType: r.mediaType }))
+      : undefined,
+  };
+
+  await store.appendMessages(sessionId, [userMessage]);
+
+  log.info(
+    `editAndResend: sessionId=${sessionId}, targetId=${targetMessageId}, ` +
+      `discarded=${discardedCount}, newText=${newText.length} chars, images=${imageRefs?.length ?? 0}`
+  );
+
+  const requestId = randomUUID();
+  const abort = new AbortController();
+  activeRequests.set(sessionId, { requestId, sessionId, abort });
+
+  void runStream({
+    requestId,
+    sessionId,
+    history: [...session.messages, userMessage],
+    systemPrompt: session.systemPrompt,
+    abort,
+    onEvent,
+  });
+
+  return { requestId, userMessageId: userMessage.id, discardedCount };
+}
+
 async function runStream(params: {
   requestId: string;
   sessionId: string;

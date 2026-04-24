@@ -108,6 +108,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chatRegenerate: (input: unknown) =>
     ipcRenderer.invoke('chat:regenerate', input),
 
+  chatEditAndResend: (input: unknown) =>
+    ipcRenderer.invoke('chat:edit-and-resend', input),
+
   chatExportSelected: (input: unknown) =>
     ipcRenderer.invoke('chat:export-selected', input),
 

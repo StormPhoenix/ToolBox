@@ -20,11 +20,15 @@
         :message="msg"
         :selection-mode="selectionMode"
         :selected="isSelected(msg.id)"
+        :editing-message-id="editingMessageId"
         @open-lightbox="(p) => $emit('open-lightbox', p)"
         @resend-image="(r) => $emit('resend-image', r)"
         @toggle-select="(id) => $emit('toggle-select', id)"
         @enter-selection="(id) => $emit('enter-selection', id)"
         @regenerate="(id) => $emit('regenerate', id)"
+        @enter-editing="(id) => $emit('enter-editing', id)"
+        @cancel-editing="$emit('cancel-editing')"
+        @submit-edit="(p) => $emit('submit-edit', p)"
       />
 
       <!-- 流式气泡：选择态下不展示，避免用户误以为能选 -->
@@ -87,6 +91,8 @@ const props = defineProps<{
   selectionMode?: boolean;
   /** 判断某条消息是否已选中 */
   isSelected?: (id: string) => boolean;
+  /** 当前正在编辑的消息 id */
+  editingMessageId?: string | null;
 }>();
 
 defineEmits<{
@@ -101,6 +107,13 @@ defineEmits<{
   'toggle-select': [id: string];
   'enter-selection': [id: string];
   'regenerate': [id: string];
+  'enter-editing': [id: string];
+  'cancel-editing': [];
+  'submit-edit': [payload: {
+    targetMessageId: string;
+    newText: string;
+    imageRefs: import('@toolbox/bridge').LLMImageRefBlock[];
+  }];
 }>();
 
 // 默认未提供 isSelected 时返回 false

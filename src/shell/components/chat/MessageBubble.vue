@@ -7,6 +7,7 @@
         'selection-mode': selectionMode,
         selected: selected,
         selectable: selectionMode,
+        editing: isEditing,
       },
     ]"
     @click="onRowClick"
@@ -18,13 +19,56 @@
       </span>
     </div>
 
-    <!--
-      row 内容：上半是气泡所在行（受 role 对齐影响），下半是工具栏占位行（整行横跨）。
-      两行一起构成 hover 触发区；hover 任一行都会显现工具栏。
-    -->
     <div class="bubble-row-body">
       <div class="bubble-line">
-        <div ref="bubbleRef" class="bubble">
+        <!-- ─── 编辑态：就地替换气泡内容 ─── -->
+        <div v-if="isEditing" class="bubble bubble-edit">
+          <!-- 只读图片缩略图（原消息中的 image_ref） -->
+          <div v-if="editImageRefs.length > 0" class="edit-images">
+            <div
+              v-for="(img, i) in editImageRefs"
+              :key="i"
+              class="edit-image-cell"
+              :title="img.fileName"
+            >
+              <img
+                :src="`toolbox-img:///${img.hash}.${extOf(img.mediaType)}`"
+                class="edit-image-thumb"
+                alt=""
+                draggable="false"
+              />
+            </div>
+            <div class="edit-images-hint">原图将一并重发</div>
+          </div>
+          <textarea
+            ref="editTextareaRef"
+            v-model="editText"
+            class="edit-textarea"
+            rows="1"
+            @keydown="onEditKeydown"
+            @input="autoResizeEdit"
+          />
+          <div class="edit-actions">
+            <button
+              class="edit-btn edit-cancel"
+              type="button"
+              @click.stop="cancelEdit"
+            >
+              取消
+            </button>
+            <button
+              class="edit-btn edit-submit"
+              type="button"
+              :disabled="!canSubmitEdit"
+              @click.stop="submitEditAction"
+            >
+              发送
+            </button>
+          </div>
+        </div>
+
+        <!-- ─── 普通态 ─── -->
+        <div v-else ref="bubbleRef" class="bubble">
           <!-- 图片网格（仅 user 消息会有） -->
           <div
             v-if="imageItems.length > 0"
@@ -38,11 +82,9 @@
               @click="onImageCellClick(i, $event)"
             >
               <img :src="item.src" class="bubble-image" alt="" draggable="false" />
-              <!-- 最后一格：超出 9 张显示 +N -->
               <div v-if="i === 8 && overflow > 0" class="bubble-image-overflow">
                 +{{ overflow }}
               </div>
-              <!-- 重新发送按钮（仅非选择态 + image_ref 有 cachePath 时才显示） -->
               <button
                 v-if="item.ref && !selectionMode"
                 class="bubble-image-resend"
@@ -55,7 +97,6 @@
             </div>
           </div>
 
-          <!-- 文本内容：assistant 走 Markdown，user 走纯文本 -->
           <MarkdownView
             v-if="message.role === 'assistant'"
             ref="markdownRef"
@@ -65,9 +106,9 @@
         </div>
       </div>
 
-      <!-- 工具栏行：始终占位；选择模式 / pending / 流式未入库 → 永久透明 -->
+      <!-- 工具栏行：编辑态下隐藏 -->
       <BubbleToolbar
-        v-if="showToolbarSlot"
+        v-if="showToolbarSlot && !isEditing"
         class="bubble-toolbar-slot"
         :class="{ 'toolbar-locked': selectionMode }"
         :message="message"
@@ -76,13 +117,14 @@
         :html-provider="htmlProvider"
         @enter-selection="$emit('enter-selection', message.id)"
         @regenerate="$emit('regenerate', message.id)"
+        @enter-editing="$emit('enter-editing', message.id)"
       />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch, nextTick } from 'vue';
 import type { ChatMessage, LLMImageRefBlock } from '@toolbox/bridge';
 import MarkdownView from './MarkdownView.vue';
 import BubbleToolbar from './BubbleToolbar.vue';
@@ -90,10 +132,10 @@ import type { LightboxItem } from './ImageLightbox.vue';
 
 const props = defineProps<{
   message: ChatMessage;
-  /** 当前是否处于选择模式 */
   selectionMode?: boolean;
-  /** 该条消息是否已被选中 */
   selected?: boolean;
+  /** 当前正在编辑的消息 id（全局唯一，由 useChat 管理） */
+  editingMessageId?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -107,11 +149,86 @@ const emit = defineEmits<{
   'toggle-select': [id: string];
   'enter-selection': [id: string];
   'regenerate': [id: string];
+  'enter-editing': [id: string];
+  'cancel-editing': [];
+  'submit-edit': [payload: {
+    targetMessageId: string;
+    newText: string;
+    imageRefs: LLMImageRefBlock[];
+  }];
 }>();
+
+// ── 编辑态 ──────────────────────────────────────────────
+
+const isEditing = computed(
+  () => props.editingMessageId === props.message.id && props.message.role === 'user'
+);
+
+const editText = ref('');
+const editTextareaRef = ref<HTMLTextAreaElement | null>(null);
+
+/** 从原消息 content 中提取 image_ref 块（编辑时原样保留） */
+const editImageRefs = computed((): LLMImageRefBlock[] => {
+  if (!isEditing.value) return [];
+  const c = props.message.content;
+  if (typeof c === 'string') return [];
+  return c.filter(
+    (b): b is LLMImageRefBlock =>
+      typeof b === 'object' && b !== null && (b as { type: string }).type === 'image_ref'
+  );
+});
+
+const canSubmitEdit = computed(
+  () => editText.value.trim().length > 0 || editImageRefs.value.length > 0
+);
+
+// 进入编辑态时初始化 editText + 自动 focus
+watch(isEditing, (editing) => {
+  if (editing) {
+    editText.value = textContent.value;
+    void nextTick(() => {
+      const el = editTextareaRef.value;
+      if (el) {
+        autoResizeEdit();
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      }
+    });
+  }
+});
+
+function autoResizeEdit(): void {
+  const el = editTextareaRef.value;
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 300) + 'px';
+}
+
+function onEditKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    submitEditAction();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    cancelEdit();
+  }
+}
+
+function cancelEdit(): void {
+  emit('cancel-editing');
+}
+
+function submitEditAction(): void {
+  if (!canSubmitEdit.value) return;
+  emit('submit-edit', {
+    targetMessageId: props.message.id,
+    newText: editText.value.trim(),
+    imageRefs: editImageRefs.value,
+  });
+}
 
 // ── 内容解析 ─────────────────────────────────────────────
 
-/** 从 content 中提取纯文本 */
 const textContent = computed((): string => {
   const c = props.message.content;
   if (typeof c === 'string') return c;
@@ -122,73 +239,43 @@ const textContent = computed((): string => {
 });
 
 interface ImageItem {
-  /** 展示 URL（toolbox-img:// 或 data:） */
   src: string;
-  /** 完整引用（仅 image_ref 块有） */
   ref: LLMImageRefBlock | null;
-  /** 文件名 */
   fileName: string;
-  /** 运行时 base64（仅 image 块），供 Lightbox 无 cachePath 时兜底 */
   fallbackBase64?: string;
   fallbackMediaType?: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 }
 
-/** 扩展名推断（toolbox-img 协议用） */
 function extOf(mt: string): string {
   switch (mt) {
-    case 'image/jpeg':
-      return 'jpg';
-    case 'image/gif':
-      return 'gif';
-    case 'image/webp':
-      return 'webp';
-    default:
-      return 'png';
+    case 'image/jpeg': return 'jpg';
+    case 'image/gif': return 'gif';
+    case 'image/webp': return 'webp';
+    default: return 'png';
   }
 }
 
-/** 从 content 中提取图片列表（image_ref 优先走 toolbox-img 协议，否则走 data URL） */
 const imageItems = computed((): ImageItem[] => {
   const c = props.message.content;
   if (typeof c === 'string') return [];
   const out: ImageItem[] = [];
   for (const b of c) {
-    if (
-      typeof b === 'object' &&
-      b !== null &&
-      (b as { type: string }).type === 'image_ref'
-    ) {
+    if (typeof b === 'object' && b !== null && (b as { type: string }).type === 'image_ref') {
       const ref = b as LLMImageRefBlock;
-      out.push({
-        src: `toolbox-img:///${ref.hash}.${extOf(ref.mediaType)}`,
-        ref,
-        fileName: ref.fileName,
-      });
-    } else if (
-      typeof b === 'object' &&
-      b !== null &&
-      (b as { type: string }).type === 'image'
-    ) {
-      const img = b as {
-        type: 'image';
-        source: { type: 'base64'; media_type: string; data: string };
-      };
+      out.push({ src: `toolbox-img:///${ref.hash}.${extOf(ref.mediaType)}`, ref, fileName: ref.fileName });
+    } else if (typeof b === 'object' && b !== null && (b as { type: string }).type === 'image') {
+      const img = b as { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
       out.push({
         src: `data:${img.source.media_type};base64,${img.source.data}`,
-        ref: null,
-        fileName: 'image',
+        ref: null, fileName: 'image',
         fallbackBase64: img.source.data,
-        fallbackMediaType:
-          img.source.media_type as ImageItem['fallbackMediaType'],
+        fallbackMediaType: img.source.media_type as ImageItem['fallbackMediaType'],
       });
     }
   }
   return out;
 });
 
-// ── 网格布局 ─────────────────────────────────────────────
-
-/** 布局类名：1 张、2 张、3+ 张（最多展示 9 张，超出显示 +N） */
 const layoutClass = computed(() => {
   const n = imageItems.value.length;
   if (n === 1) return 'layout-1';
@@ -203,39 +290,25 @@ const overflow = computed(() => Math.max(0, imageItems.value.length - 9));
 
 function openLightbox(index: number): void {
   const items: LightboxItem[] = imageItems.value.map((it) => ({
-    src: it.src,
-    cachePath: it.ref?.cachePath,
-    fileName: it.fileName,
-    fallbackBase64: it.fallbackBase64,
-    fallbackMediaType: it.fallbackMediaType,
+    src: it.src, cachePath: it.ref?.cachePath, fileName: it.fileName,
+    fallbackBase64: it.fallbackBase64, fallbackMediaType: it.fallbackMediaType,
   }));
   emit('open-lightbox', { items, index });
 }
 
 function onImageCellClick(index: number, e: MouseEvent): void {
-  // 选择模式下，点击图片单元格 = 切换整行选中，不开 Lightbox
-  if (props.selectionMode) {
-    e.stopPropagation(); // 让 .bubble-row @click 接管
-    emit('toggle-select', props.message.id);
-    return;
-  }
+  if (props.selectionMode) { e.stopPropagation(); emit('toggle-select', props.message.id); return; }
   openLightbox(index);
 }
 
 function onRowClick(): void {
   if (!props.selectionMode) return;
-  // pending 乐观消息不允许选中（id 以 pending- 开头）
   if (props.message.id.startsWith('pending-')) return;
   emit('toggle-select', props.message.id);
 }
 
 function resend(ref: LLMImageRefBlock): void {
-  emit('resend-image', {
-    cachePath: ref.cachePath,
-    hash: ref.hash,
-    mediaType: ref.mediaType,
-    fileName: ref.fileName,
-  });
+  emit('resend-image', { cachePath: ref.cachePath, hash: ref.hash, mediaType: ref.mediaType, fileName: ref.fileName });
 }
 
 // ── hover 工具栏 ─────────────────────────────────────────
@@ -243,23 +316,13 @@ function resend(ref: LLMImageRefBlock): void {
 const bubbleRef = ref<HTMLElement | null>(null);
 const markdownRef = ref<InstanceType<typeof MarkdownView> | null>(null);
 
-/**
- * 工具栏插槽可见性：
- *  - 只对已落库的正式消息渲染（pending 乐观消息不渲染、不占位）
- *  - 选择模式下仍然渲染（占位保留），但透明且不可交互
- */
 const showToolbarSlot = computed(() => {
   if (props.message.id.startsWith('pending-')) return false;
   return true;
 });
 
-/**
- * 为剪贴板 text/html 分支提供 assistant 渲染后的 HTML；
- * user 气泡传 null，让工具栏退化为 <p> 包裹纯文本。
- */
 function htmlProvider(): string | null {
   if (props.message.role !== 'assistant') return null;
-  // MarkdownView 内部容器 .markdown-body
   const root = (markdownRef.value as unknown as { $el?: HTMLElement })?.$el;
   if (!root) return null;
   return root.innerHTML || null;
@@ -267,19 +330,6 @@ function htmlProvider(): string | null {
 </script>
 
 <style scoped>
-/**
- * bubble-row：水平 flex 布局。
- *  - 默认：checkbox 不存在，bubble-row-body 占满宽度
- *  - 选择态：左侧 checkbox 列 28px + body 剩余宽度
- *
- * bubble-row-body：垂直 flex（气泡行 + 工具栏占位行）。
- *  工具栏占位始终存在（除 pending 消息外），高度固定 28px（24+4 margin-top）。
- *
- * hover 触发：
- *  - .bubble-row:hover → 子孙 .bubble-toolbar-slot 显现
- *  - 整个 row（气泡行 + 工具栏行）都是 hover 区域，且 row 宽度横跨 MessageList
- *    内容区（920px max-width），满足"整行横跨"语义
- */
 .bubble-row {
   display: flex;
   width: 100%;
@@ -289,7 +339,6 @@ function htmlProvider(): string | null {
   transition: background var(--transition);
 }
 
-/* bubble-row-body 撑满剩余宽度，保证工具栏占位行能够左右对齐到两端 */
 .bubble-row-body {
   display: flex;
   flex-direction: column;
@@ -297,61 +346,36 @@ function htmlProvider(): string | null {
   min-width: 0;
 }
 
-/* 气泡行：根据 role 决定对齐 */
 .bubble-line {
   display: flex;
   width: 100%;
 }
-.role-user .bubble-line {
-  justify-content: flex-end;
-}
-.role-assistant .bubble-line {
-  justify-content: flex-start;
-}
+.role-user .bubble-line { justify-content: flex-end; }
+.role-assistant .bubble-line { justify-content: flex-start; }
 
 /* ── 选择态 ─────────────────────────────────── */
-.bubble-row.selectable {
-  cursor: pointer;
-}
-.bubble-row.selectable:hover {
-  background: rgba(108, 92, 231, 0.06);
-}
-.bubble-row.selected {
-  background: rgba(108, 92, 231, 0.14);
-}
+.bubble-row.selectable { cursor: pointer; }
+.bubble-row.selectable:hover { background: rgba(108, 92, 231, 0.06); }
+.bubble-row.selected { background: rgba(108, 92, 231, 0.14); }
 
-/* checkbox 列 */
 .bubble-checkbox {
   flex: 0 0 28px;
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 12px; /* 与气泡文本基线大致对齐 */
+  padding-top: 12px;
 }
 .checkbox-box {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
+  width: 16px; height: 16px; border-radius: 4px;
   border: 1.5px solid var(--border-active, #555);
   background: var(--bg-base);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: flex; align-items: center; justify-content: center;
   transition: background var(--transition), border-color var(--transition);
 }
-.checkbox-box.checked {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-.checkbox-tick {
-  color: #fff;
-  font-size: 0.68rem;
-  line-height: 1;
-  font-weight: 700;
-}
+.checkbox-box.checked { background: var(--accent); border-color: var(--accent); }
+.checkbox-tick { color: #fff; font-size: 0.68rem; line-height: 1; font-weight: 700; }
 
-/* ── 气泡本身 ─────────────────────────────────── */
-
+/* ── 气泡 ─────────────────────────────────── */
 .bubble {
   max-width: min(760px, 88%);
   padding: 10px 14px;
@@ -360,134 +384,107 @@ function htmlProvider(): string | null {
   word-break: break-word;
   min-width: 0;
 }
+.role-user .bubble { background: var(--accent); color: #fff; border-top-right-radius: 4px; }
+.role-assistant .bubble { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-top-left-radius: 4px; }
+.bubble-row.selected .bubble { box-shadow: 0 0 0 2px var(--accent); }
+.bubble-user-text { white-space: pre-wrap; font-size: 0.9rem; }
 
-.role-user .bubble {
-  background: var(--accent);
-  color: #fff;
-  border-top-right-radius: 4px;
+/* ── 编辑态气泡 ─────────────────────────────── */
+.bubble-edit {
+  background: var(--bg-card) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-active, var(--accent)) !important;
+  border-radius: 12px !important;
+  max-width: min(760px, 88%);
+  padding: 10px 14px;
 }
 
-.role-assistant .bubble {
-  background: var(--bg-card);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
-  border-top-left-radius: 4px;
-}
-
-/* 选中气泡：加一圈描边 */
-.bubble-row.selected .bubble {
-  box-shadow: 0 0 0 2px var(--accent);
-}
-
-.bubble-user-text {
-  white-space: pre-wrap;
-  font-size: 0.9rem;
-}
-
-/* ── 图片网格 ───────────────────────────────────── */
-
-.bubble-images {
-  display: grid;
-  gap: 4px;
+.edit-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
   margin-bottom: 8px;
 }
-
-.layout-1 {
-  /* 让网格单元格宽度跟随图片实际渲染宽度，避免竖图时 cell 留出空白（露出深色背景） */
-  grid-template-columns: max-content;
-}
-.layout-1 .bubble-image {
-  max-width: 240px;
-  max-height: 240px;
-  width: auto;
-  height: auto;
-}
-
-.layout-2 {
-  grid-template-columns: repeat(2, 180px);
-}
-.layout-2 .bubble-image {
-  width: 180px;
-  height: 135px;
-}
-
-.layout-grid {
-  grid-template-columns: repeat(3, 120px);
-}
-.layout-grid .bubble-image {
-  width: 120px;
-  height: 90px;
-}
-
-.bubble-image-cell {
-  position: relative;
-  cursor: zoom-in;
-  border-radius: 8px;
+.edit-image-cell {
+  width: 56px; height: 42px;
+  border-radius: 6px;
   overflow: hidden;
-  line-height: 0;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
 }
-.bubble-row.selectable .bubble-image-cell {
-  cursor: pointer;
+.edit-image-thumb {
+  width: 100%; height: 100%;
+  object-fit: cover; display: block;
 }
-
-.bubble-image {
-  object-fit: cover;
-  display: block;
-  transition: transform var(--transition);
-}
-.bubble-image-cell:hover .bubble-image {
-  transform: scale(1.03);
+.edit-images-hint {
+  font-size: 0.7rem;
+  color: var(--text-dim);
 }
 
-/* "+N" 遮罩（最后一格） */
-.bubble-image-overflow {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.58);
-  color: #fff;
+.edit-textarea {
+  width: 100%;
+  resize: none;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  padding: 8px 10px;
+  max-height: 300px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+.edit-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow, rgba(108, 92, 231, 0.2));
+}
+
+.edit-actions {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.2rem;
-  font-weight: 600;
-  pointer-events: none;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
 }
-
-/* 重发按钮：仅 hover 时显现 */
-.bubble-image-resend {
-  position: absolute;
-  bottom: 4px;
-  right: 4px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  border: none;
-  cursor: pointer;
+.edit-btn {
+  padding: 5px 14px;
+  border-radius: 8px;
   font-size: 0.82rem;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  opacity: 0;
-  transition: opacity var(--transition), background var(--transition);
+  cursor: pointer;
+  border: none;
+  transition: background var(--transition), color var(--transition);
 }
-.bubble-image-cell:hover .bubble-image-resend {
-  opacity: 1;
+.edit-cancel {
+  background: transparent;
+  color: var(--text-secondary);
 }
-.bubble-image-resend:hover {
-  background: rgba(0, 0, 0, 0.8);
+.edit-cancel:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.edit-submit {
+  background: var(--accent);
+  color: #fff;
 }
+.edit-submit:hover:not(:disabled) { background: var(--accent-light); }
+.edit-submit:disabled { opacity: 0.45; cursor: not-allowed; }
 
-/* ── hover 工具栏显现规则 ─────────────────────────
- *
- * 1) 非选择模式：.bubble-row:hover 时工具栏 opacity → 1
- * 2) 选择模式：工具栏永久透明不可交互（toolbar-locked 标记）
- */
-.bubble-row:hover .bubble-toolbar-slot:not(.toolbar-locked) {
-  opacity: 1;
-  pointer-events: auto;
-}
+/* ── 图片网格 ───────────────────────────────────── */
+.bubble-images { display: grid; gap: 4px; margin-bottom: 8px; }
+.layout-1 { grid-template-columns: max-content; }
+.layout-1 .bubble-image { max-width: 240px; max-height: 240px; width: auto; height: auto; }
+.layout-2 { grid-template-columns: repeat(2, 180px); }
+.layout-2 .bubble-image { width: 180px; height: 135px; }
+.layout-grid { grid-template-columns: repeat(3, 120px); }
+.layout-grid .bubble-image { width: 120px; height: 90px; }
+.bubble-image-cell { position: relative; cursor: zoom-in; border-radius: 8px; overflow: hidden; line-height: 0; }
+.bubble-row.selectable .bubble-image-cell { cursor: pointer; }
+.bubble-image { object-fit: cover; display: block; transition: transform var(--transition); }
+.bubble-image-cell:hover .bubble-image { transform: scale(1.03); }
+.bubble-image-overflow { position: absolute; inset: 0; background: rgba(0,0,0,.58); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; font-weight: 600; pointer-events: none; }
+.bubble-image-resend { position: absolute; bottom: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; border: none; cursor: pointer; font-size: .82rem; line-height: 1; display: flex; align-items: center; justify-content: center; padding: 0; opacity: 0; transition: opacity var(--transition), background var(--transition); }
+.bubble-image-cell:hover .bubble-image-resend { opacity: 1; }
+.bubble-image-resend:hover { background: rgba(0,0,0,.8); }
+
+/* ── hover 工具栏 ─────────────────────────────── */
+.bubble-row:hover .bubble-toolbar-slot:not(.toolbar-locked) { opacity: 1; pointer-events: auto; }
 </style>

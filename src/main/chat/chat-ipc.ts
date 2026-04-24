@@ -171,6 +171,39 @@ export function registerChatHandlers(): void {
     }
   );
 
+  // ── chat:edit-and-resend ─────────────────────────────────
+  // 编辑某条 user 消息并重发：截断 + 新消息 + 流式
+  ipcMain.handle(
+    'chat:edit-and-resend',
+    async (
+      _e,
+      input: {
+        sessionId: string;
+        targetMessageId: string;
+        newText: string;
+        imageRefs?: unknown[];
+      }
+    ): Promise<{ requestId: string; userMessageId: string; discardedCount: number }> => {
+      if (!input?.sessionId) throw new Error('缺少 sessionId');
+      if (!input?.targetMessageId) throw new Error('缺少 targetMessageId');
+      if (!input?.newText?.trim() && !(input?.imageRefs?.length)) {
+        throw new Error('编辑后消息不能为空');
+      }
+
+      log.info(
+        `chat:edit-and-resend sessionId=${input.sessionId}, targetId=${input.targetMessageId}, ` +
+          `text=${input.newText?.length ?? 0} chars, images=${input.imageRefs?.length ?? 0}`
+      );
+      return engine.editAndResend({
+        sessionId: input.sessionId,
+        targetMessageId: input.targetMessageId,
+        newText: input.newText,
+        imageRefs: input.imageRefs as LLMImageRefBlock[] | undefined,
+        onEvent: broadcastEvent,
+      });
+    }
+  );
+
   // ── chat:export-selected ────────────────────────────────
   // 把选中的消息合并写成 Markdown（+ 同级 images/ 子目录）
   ipcMain.handle(

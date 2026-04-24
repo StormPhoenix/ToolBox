@@ -17,6 +17,26 @@
       </span>
     </button>
 
+    <!-- 编辑（仅 user） -->
+    <button
+      v-if="role === 'user'"
+      class="bubble-toolbar-btn"
+      :class="{ disabled: editDisabled }"
+      type="button"
+      :title="editDisabled ? '生成中，稍后再试' : '编辑此消息'"
+      :aria-label="editDisabled ? '生成中，稍后再试' : '编辑此消息'"
+      :disabled="editDisabled"
+      @click.stop="onEdit"
+    >
+      <span class="icon" aria-hidden="true">
+        <!-- 铅笔图标 -->
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4">
+          <path d="M11.5 1.5l3 3L5 14H2v-3z" />
+          <path d="M9.5 3.5l3 3" />
+        </svg>
+      </span>
+    </button>
+
     <!-- 重新生成（仅 assistant） -->
     <button
       v-if="role === 'assistant'"
@@ -92,12 +112,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   'enter-selection': [];
   regenerate: [];
+  'enter-editing': [];
   copied: [];
 }>();
 
 const { isStreaming } = useChat();
 
 const regenerateDisabled = computed(() => isStreaming.value);
+const editDisabled = computed(() => isStreaming.value);
 const enterSelectionDisabled = computed(() => isStreaming.value);
 
 const copied = ref(false);
@@ -140,6 +162,11 @@ function collectImagePlaceholders(msg: ChatMessage): string[] {
 function onRegenerate(): void {
   if (regenerateDisabled.value) return;
   emit('regenerate');
+}
+
+function onEdit(): void {
+  if (editDisabled.value) return;
+  emit('enter-editing');
 }
 
 async function onCopy(): Promise<void> {

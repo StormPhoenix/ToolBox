@@ -439,6 +439,26 @@ export interface ChatRegenerateResult {
   discardedCount: number;
 }
 
+/** chat:edit-and-resend 入参 */
+export interface ChatEditAndResendInput {
+  sessionId: string;
+  /** 被编辑的 user 消息 id */
+  targetMessageId: string;
+  /** 修改后的文本 */
+  newText: string;
+  /** 原消息中的图片引用，原样保留（不走压缩管线） */
+  imageRefs?: LLMImageRefBlock[];
+}
+
+/** chat:edit-and-resend 出参 */
+export interface ChatEditAndResendResult {
+  requestId: string;
+  /** 新 user 消息 id（已持久化） */
+  userMessageId: string;
+  /** 被丢弃的消息数（含被编辑的原消息自身） */
+  discardedCount: number;
+}
+
 /** chat:export-selected 入参 */
 export interface ChatExportInput {
   sessionId: string;
@@ -674,6 +694,13 @@ export interface ElectronAPI {
    * 真实回复通过 chat:event 推送。
    */
   chatRegenerate(input: ChatRegenerateInput): Promise<ChatRegenerateResult>;
+
+  /**
+   * 编辑某条 user 消息并重发。
+   * 截断该消息（含）及之后所有内容，用修改后的文本 + 原图片引用构造新 user 消息，
+   * 然后启动流式 LLM 调用。真实回复通过 chat:event 推送。
+   */
+  chatEditAndResend(input: ChatEditAndResendInput): Promise<ChatEditAndResendResult>;
 
   /**
    * 把选中的多条消息合并导出为 Markdown 文件。

@@ -238,6 +238,7 @@ plugins/
 | `chatResendImageRef(ref)` | `chat:resend-image-ref` | 根据历史 `imageRef` 读缓存文件返回 `ChatAttachmentInput`，供 Composer 再次使用 |
 | `chatExportSelected(input)` | `chat:export-selected` | 把选中的消息合并导出为 Markdown 文件；在 targetPath 同级创建 `<stem>/` 子目录，写入 `.md` 和 `images/` 子目录 |
 | `chatRegenerate(input)` | `chat:regenerate` | 重新生成指定 assistant 消息：截断该消息（含）及后续所有消息，基于截断后上下文重新调用 LLM 流式生成 |
+| `chatEditAndResend(input)` | `chat:edit-and-resend` | 编辑某条 user 消息并重发：截断该消息（含）及后续所有消息，用修改后文本 + 原图片引用构造新 user 消息并流式生成 |
 | `onChatEvent(cb)` | `chat:event`（push） | 订阅 Chat 事件流（`stream-chunk` / `stream-end` / `error` / `aborted`），返回 dispose 函数 |
 
 **新增 IPC 通道三步骤：**

@@ -36,6 +36,9 @@ const lastError = ref<string | null>(null);
 const selectionMode = ref<boolean>(false);
 const selectedIds = ref<Set<string>>(new Set());
 
+// 编辑态
+const editingMessageId = ref<string | null>(null);
+
 let eventDisposer: (() => void) | null = null;
 let initialized = false;
 
@@ -100,17 +103,23 @@ function ensureInitialized(): void {
   initialized = true;
   eventDisposer = window.electronAPI.onChatEvent(handleChatEvent);
 
-  // 会话切换 / 开始流式生成 时自动退出选择态
+  // 会话切换 / 开始流式生成 时自动退出选择态 / 编辑态
   watch(
     () => activeSession.value?.id ?? null,
     (_next, prev) => {
-      if (prev !== undefined) exitSelection();
+      if (prev !== undefined) {
+        exitSelection();
+        exitEditing();
+      }
     }
   );
   watch(
     () => currentRequestId.value,
     (reqId) => {
-      if (reqId && selectionMode.value) exitSelection();
+      if (reqId) {
+        if (selectionMode.value) exitSelection();
+        if (editingMessageId.value) exitEditing();
+      }
     }
   );
 }
@@ -349,6 +358,106 @@ async function regenerateMessage(assistantMessageId: string): Promise<void> {
   }
 }
 
+// ─── 编辑并重发（V1.2） ───────────────────────────────────
+
+/**
+ * 进入编辑态：标记 editingMessageId，UI 层据此把气泡内容替换为 textarea。
+ *
+ * 同一时间只允许编辑一条（Q4-a）：如果正在编辑另一条，自动退出再切换。
+ */
+function enterEditing(messageId: string): void {
+  if (currentRequestId.value) return; // 流式中禁止
+  if (!activeSession.value) return;
+  if (selectionMode.value) exitSelection();
+  editingMessageId.value = messageId;
+}
+
+function exitEditing(): void {
+  editingMessageId.value = null;
+}
+
+/**
+ * 提交编辑后的文本 + 原图 imageRef，截断并重发。
+ *
+ * 无二次确认（Q7 用户要求直接丢弃）。
+ */
+async function submitEdit(
+  targetMessageId: string,
+  newText: string,
+  imageRefs?: Array<{
+    type: 'image_ref';
+    cachePath: string;
+    hash: string;
+    mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+    fileName: string;
+    byteSize: number;
+    width?: number;
+    height?: number;
+  }>
+): Promise<void> {
+  if (!activeSession.value) return;
+  if (currentRequestId.value) return;
+
+  const msgs = activeSession.value.messages;
+  const idx = msgs.findIndex((m) => m.id === targetMessageId);
+  if (idx < 0) return;
+
+  // 乐观截断
+  activeSession.value.messages = msgs.slice(0, idx);
+  editingMessageId.value = null;
+  lastError.value = null;
+
+  try {
+    // 解包为纯 POJO（避免 Vue Proxy structured clone 问题）
+    const plainRefs = imageRefs?.map((r) => ({
+      type: r.type as 'image_ref',
+      cachePath: r.cachePath,
+      hash: r.hash,
+      mediaType: r.mediaType,
+      fileName: r.fileName,
+      byteSize: r.byteSize,
+      width: r.width,
+      height: r.height,
+    }));
+
+    const result = await window.electronAPI.chatEditAndResend({
+      sessionId: activeSession.value.id,
+      targetMessageId,
+      newText,
+      imageRefs: plainRefs,
+    });
+
+    // 乐观追加新 user 消息（含 imageRef，保证图片立即可见）
+    const hasImages = plainRefs && plainRefs.length > 0;
+    const optimisticContent = hasImages
+      ? [
+          ...(newText.trim()
+            ? [{ type: 'text' as const, text: newText }]
+            : []),
+          ...plainRefs!,
+        ]
+      : newText;
+
+    const optimisticMsg: ChatMessage = {
+      id: result.userMessageId,
+      role: 'user',
+      content: optimisticContent,
+      timestamp: Date.now(),
+    };
+    activeSession.value.messages.push(optimisticMsg);
+    currentRequestId.value = result.requestId;
+  } catch (err) {
+    lastError.value = (err as Error).message;
+    if (activeSession.value) {
+      const id = activeSession.value.id;
+      const fresh = await window.electronAPI.chatLoadSession(id);
+      if (fresh && activeSession.value?.id === id) {
+        activeSession.value = fresh;
+      }
+    }
+  }
+}
+
 // ─── 导出 composable ──────────────────────────────────────
 
 export function useChat() {
@@ -393,6 +502,12 @@ export function useChat() {
 
     // regenerate
     regenerateMessage,
+
+    // editing
+    editingMessageId,
+    enterEditing,
+    exitEditing,
+    submitEdit,
   };
 }
 

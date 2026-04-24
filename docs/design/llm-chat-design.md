@@ -579,3 +579,80 @@ chatRegenerate(input: {
 | `src/shell/components/chat/MessageList.vue` | 透传 `regenerate` 事件 |
 | `src/shell/components/chat/ChatView.vue` | 监听 `@regenerate` → `useChat.regenerateMessage` |
 
+---
+
+## 12. V1.2 — 编辑并重发 user 消息（已落地）
+
+### 12.1 功能
+
+user 气泡 hover 工具栏新增"✎ 编辑"按钮。点击后：
+
+1. 气泡就地变成 inline textarea（原地编辑），初始值为原消息纯文本
+2. 原消息中的图片以只读缩略图展示在 textarea 上方（提示"原图将一并重发"）
+3. 用户修改文本后点"发送"或 Enter → 截断该 user 消息（含）及之后所有消息，
+   用修改后文本 + 原 imageRef 构造新 user 消息，启动 LLM 流式生成
+4. Esc 或点"取消"退出编辑态
+
+### 12.2 按钮矩阵
+
+| 按钮     | user 气泡 | assistant 气泡 |
+|----------|-----------|----------------|
+| 📋 复制  | ✓         | ✓              |
+| ✎ 编辑  | ✓         | ✗              |
+| ⟲ 重新生成 | ✗       | ✓              |
+| ☑︎ 多选  | ✓         | ✓              |
+
+### 12.3 编辑态规则
+
+| 规则 | 描述 |
+|---|---|
+| 同一时间只允许一条编辑 | 切换编辑另一条 → 前一条自动退出（无 confirm） |
+| 图片保留 | 原消息 `image_ref` 块原样传给主进程，不走压缩管线 |
+| 丢弃后续 | 无二次确认，直接丢弃 |
+| 流式中禁用 | 编辑按钮 disabled（`isStreaming`） |
+| 选择模式互斥 | 进入编辑 → 先退出选择模式；选择模式下工具栏不可交互 |
+| 自动退出 | 切换会话 / 开始流式生成 → 自动退出编辑态 |
+
+### 12.4 IPC
+
+```ts
+chatEditAndResend(input: {
+  sessionId: string;
+  targetMessageId: string;
+  newText: string;
+  imageRefs?: LLMImageRefBlock[];   // 原图引用，直接复用缓存
+}): Promise<{
+  requestId: string;
+  userMessageId: string;
+  discardedCount: number;
+}>;
+```
+
+主进程 `chat-engine.ts` 新增 `editAndResend()` 入口：
+1. 截断 `session.messages.slice(0, idx)` + saveSession
+2. 拼 `text` + `imageRef` 为新 `PersistedContentBlock[]`（不走 `storeImage` 压缩，imageRef 已落盘）
+3. `appendMessages(sessionId, [newUserMsg])`
+4. 复用 `runStream()` 启动流式生成
+
+### 12.5 编辑态 UI
+
+编辑态下 `.bubble` 被 `.bubble-edit` 替换：
+- 上方：只读图片缩略图网格（56×42，不可删不可加）+ 提示文字"原图将一并重发"
+- 中间：`textarea`（自动 resize，最大 300px，`Enter` 发送 / `Shift+Enter` 换行 / `Esc` 取消）
+- 下方：取消（ghost） + 发送（accent）按钮，右对齐
+- 工具栏行在编辑态下不渲染（`v-if="!isEditing"`）
+
+### 12.6 改动清单
+
+| 文件 | 改动 |
+|---|---|
+| `src/main/chat/chat-engine.ts` | 新增 `editAndResend()` |
+| `src/main/chat/chat-ipc.ts` | 注册 `chat:edit-and-resend` |
+| `src/main/preload.ts` | 暴露 `chatEditAndResend` |
+| `plugins/shared/bridge/src/types.ts` / `index.ts` | `ChatEditAndResendInput` / `ChatEditAndResendResult` + API 签名 |
+| `src/shell/composables/useChat.ts` | `editingMessageId` / `enterEditing` / `exitEditing` / `submitEdit` + 自动退出 watch |
+| `src/shell/components/chat/BubbleToolbar.vue` | user 气泡新增 ✎ 编辑按钮 |
+| `src/shell/components/chat/MessageBubble.vue` | 编辑态 inline textarea + 只读缩略图 + 取消/发送 |
+| `src/shell/components/chat/MessageList.vue` | 透传 `editingMessageId` prop + 编辑相关事件 |
+| `src/shell/components/chat/ChatView.vue` | 监听编辑事件 → `useChat` 方法 |
+

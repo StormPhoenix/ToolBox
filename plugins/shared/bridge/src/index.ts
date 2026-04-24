@@ -55,6 +55,8 @@ export type {
   ChatSendResult,
   ChatRegenerateInput,
   ChatRegenerateResult,
+  ChatEditAndResendInput,
+  ChatEditAndResendResult,
   ChatExportInput,
   ChatExportResult,
   ChatEvent,
