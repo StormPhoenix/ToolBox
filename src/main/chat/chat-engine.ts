@@ -23,6 +23,8 @@ import type {
   LLMToolUseBlock,
   LLMToolResultBlock,
   LLMToolDef,
+  LLMSystemBlock,
+  LLMSystemParam,
 } from '../llm/types';
 import { getSharedLLMRouter } from '../llm/llm-ipc';
 import type {
@@ -614,21 +616,42 @@ async function runStream(params: {
     return;
   }
 
-  // 构建 system prompt：原始 + Skill instructions
-  let fullSystemPrompt = systemPrompt?.trim() || '';
+  // 构建 system prompt：分块 + 对 stable 部分标记 cache_control
+  //
+  // 缓存策略（仅 Claude 生效，其他 Provider 的 cache_control 会被忽略并 flatten 为纯字符串）：
+  // - session.systemPrompt（用户/会话级设定，通常不变）
+  // - Skill instructions（启用的 Skill 列表稳定时也不变）
+  // 合并为一个 stable 块，标记 ephemeral（5 分钟 TTL）。
+  // 对话轮次多时，这部分 token 从 $3/M 降为 $0.30/M（约 1/10 价格）。
+  //
+  // cache miss 的场景：
+  // - 用户启用/禁用 Skill（低频）
+  // - 永久信任列表变化（低频）
+  // - 跨应用会话首次请求（无 cache 可用）
   const registry = sharedSkillRegistry;
   const tools: LLMToolDef[] | undefined =
     enableTools && registry ? registry.getLLMTools() : undefined;
   const hasTools = tools && tools.length > 0;
 
+  const stableParts: string[] = [];
+  const sessionSys = systemPrompt?.trim();
+  if (sessionSys) stableParts.push(sessionSys);
+
   if (hasTools && registry) {
     const skillInstructions = registry.buildSystemInstructions();
-    if (skillInstructions) {
-      fullSystemPrompt = fullSystemPrompt
-        ? fullSystemPrompt + '\n\n' + skillInstructions
-        : skillInstructions;
-    }
+    if (skillInstructions) stableParts.push(skillInstructions);
   }
+
+  const systemBlocks: LLMSystemBlock[] = [];
+  if (stableParts.length > 0) {
+    systemBlocks.push({
+      type: 'text',
+      text: stableParts.join('\n\n'),
+      cache_control: { type: 'ephemeral' },
+    });
+  }
+  // LLMSystemParam：空数组也是合法的（Claude 会正常处理，其他 Provider 会 flatten 为 ''）
+  const systemParam: LLMSystemParam = systemBlocks;
 
   // 中间步骤消息，最终一次性持久化
   const pendingMessages: ChatMessage[] = [];
@@ -654,7 +677,7 @@ async function runStream(params: {
       );
 
       const response = await provider.streamMessage(
-        fullSystemPrompt,
+        systemParam,
         llmMessages,
         (delta) => {
           if (!firstTokenMs) {
@@ -718,9 +741,12 @@ async function runStream(params: {
         });
 
         const duration = Date.now() - runStartMs;
+        const cacheInfo = response.usage
+          ? ` cache_read=${response.usage.cache_read_input_tokens ?? 0}, cache_create=${response.usage.cache_creation_input_tokens ?? 0}`
+          : '';
         log.info(
           `streamMessage 完成: requestId=${requestId}, 耗时=${duration}ms, iters=${iter}, ` +
-            `text=${finalText.length} chars, usage=${usage ? `in=${usage.input_tokens},out=${usage.output_tokens}` : 'N/A'}`
+            `text=${finalText.length} chars, usage=${usage ? `in=${usage.input_tokens},out=${usage.output_tokens}` : 'N/A'}${cacheInfo}`
         );
         return;
       }
