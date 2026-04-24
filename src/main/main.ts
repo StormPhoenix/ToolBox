@@ -11,6 +11,9 @@ import {
 import { registerLLMHandlers } from './llm/llm-ipc';
 import { registerImageResizeHandlers } from './image-resize/image-ipc';
 import { registerChatHandlers } from './chat/chat-ipc';
+import { setSharedSkillRegistry } from './chat/chat-engine';
+import { SkillRegistry } from './skill/skill-registry';
+import { initializeSkillSystem } from './skill/skill-ipc';
 import {
   registerImageProtocolSchemes,
   registerImageProtocolHandler,
@@ -194,6 +197,14 @@ app.whenReady().then(() => {
   registerImageResizeHandlers();
   registerChatHandlers();
   registerImageProtocolHandler();
+
+  // 初始化 Skill 系统（加载 builtin + user skills → 注入到 ChatEngine）
+  const skillRegistry = new SkillRegistry();
+  setSharedSkillRegistry(skillRegistry);
+  void initializeSkillSystem(skillRegistry).catch((err) =>
+    log.warn(`Skill 系统初始化异常: ${(err as Error).message}`)
+  );
+
   // 启动时清理不再被引用的图片缓存（不阻塞启动）
   void cleanOrphanImages().catch((err) =>
     log.warn(`cleanOrphanImages 异常: ${(err as Error).message}`)

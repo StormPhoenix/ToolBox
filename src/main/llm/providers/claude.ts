@@ -78,7 +78,9 @@ export class ClaudeProvider implements LLMProvider {
     system: LLMSystemParam,
     messages: LLMMessageParam[],
     onText: (delta: string) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    tools?: import('../types').LLMToolDef[],
+    toolChoice?: import('../types').LLMToolChoice,
   ): Promise<LLMResponse> {
     try {
       const stream = this.client.messages.stream({
@@ -86,6 +88,11 @@ export class ClaudeProvider implements LLMProvider {
         max_tokens: this.maxTokens,
         system: toAnthropicSystem(system),
         messages: messages as MessageParam[],
+        tools: tools?.length ? tools.map(toAnthropicTool) : undefined,
+        tool_choice:
+          tools?.length && toolChoice
+            ? toAnthropicToolChoice(toolChoice)
+            : undefined,
       });
 
       // AbortSignal → stream.abort()

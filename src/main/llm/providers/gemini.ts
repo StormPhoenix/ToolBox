@@ -78,10 +78,13 @@ export class GeminiProvider implements LLMProvider {
     system: LLMSystemParam,
     messages: LLMMessageParam[],
     onText: (delta: string) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    tools?: LLMToolDef[],
+    _toolChoice?: LLMToolChoice,
   ): Promise<LLMResponse> {
     const contents = toGeminiContents(messages);
     const systemStr = flattenSystem(system);
+    const toolDecls = tools?.length ? tools.map(toGeminiFunctionDecl) : undefined;
 
     const iter = await this.ai.models.generateContentStream({
       model: this.model,
@@ -90,6 +93,7 @@ export class GeminiProvider implements LLMProvider {
         systemInstruction: systemStr || undefined,
         maxOutputTokens: this.maxTokens,
         ...(signal && { abortSignal: signal }),
+        ...(toolDecls && { tools: [{ functionDeclarations: toolDecls }] }),
       },
     });
 
@@ -97,10 +101,10 @@ export class GeminiProvider implements LLMProvider {
     let usage:
       | { input_tokens: number; output_tokens: number }
       | undefined;
+    const functionCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
 
     for await (const chunk of iter) {
       if (signal?.aborted) {
-        // 主动中止：SDK 会抛 AbortError，但保险起见在迭代点也 break
         throw new Error('AbortError');
       }
       const delta = typeof chunk.text === 'string' ? chunk.text : undefined;
@@ -108,6 +112,19 @@ export class GeminiProvider implements LLMProvider {
         fullText += delta;
         onText(delta);
       }
+
+      // functionCall 在某些 chunk 中出现
+      if (chunk.candidates?.[0]?.content?.parts) {
+        for (const part of chunk.candidates[0].content.parts) {
+          if (part.functionCall) {
+            functionCalls.push({
+              name: part.functionCall.name ?? '',
+              args: (part.functionCall.args ?? {}) as Record<string, unknown>,
+            });
+          }
+        }
+      }
+
       if (chunk.usageMetadata) {
         usage = {
           input_tokens: chunk.usageMetadata.promptTokenCount ?? 0,
@@ -116,13 +133,27 @@ export class GeminiProvider implements LLMProvider {
       }
     }
 
+    // 组装 content blocks
+    const content: LLMContentBlock[] = [];
+    if (fullText) {
+      content.push({ type: 'text', text: fullText });
+    }
+    for (const fc of functionCalls) {
+      content.push({
+        type: 'tool_use',
+        id: genToolId(),
+        name: fc.name,
+        input: fc.args,
+      });
+    }
+
     log.info(
-      `streamMessage 完成: text=${fullText.length} chars, model=${this.model}`
+      `streamMessage 完成: text=${fullText.length} chars, functionCalls=${functionCalls.length}, model=${this.model}`
     );
 
     return {
-      content: fullText ? [{ type: 'text', text: fullText }] : [],
-      stop_reason: 'end_turn',
+      content,
+      stop_reason: functionCalls.length > 0 ? 'tool_use' : 'end_turn',
       usage,
     };
   }

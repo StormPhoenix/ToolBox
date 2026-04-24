@@ -58,6 +58,8 @@
           :selection-mode="selectionMode"
           :is-selected="isSelected"
           :editing-message-id="editingMessageId"
+          :tool-executing="toolExecuting"
+          :tool-results="toolResults"
           @dismiss-error="dismissError"
           @resend-image="onResendImage"
           @open-lightbox="onOpenLightbox"
@@ -156,6 +158,9 @@ const {
   streamingText,
   isStreaming,
   lastError,
+  // tool call state
+  toolExecuting,
+  toolResults,
   // selection
   selectionMode,
   selectedIds,

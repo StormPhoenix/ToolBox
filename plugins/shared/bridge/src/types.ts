@@ -384,6 +384,8 @@ export interface ChatMessage {
   timestamp: number;
   attachments?: Array<{ name: string; mediaType: string }>;
   model?: { provider: LLMProviderType; model: string };
+  /** 标记此消息是否为 tool 交互的中间步骤 */
+  toolRoundtrip?: boolean;
 }
 
 /** 完整会话 */
@@ -493,6 +495,22 @@ export type ChatEvent =
       text: string;
       assistantMessageId: string;
       usage?: { input_tokens: number; output_tokens: number };
+    }
+  | { kind: 'stream-reset'; requestId: string }
+  | {
+      kind: 'tool-executing';
+      requestId: string;
+      toolName: string;
+      toolDisplayName: string;
+      toolInput: unknown;
+    }
+  | {
+      kind: 'tool-done';
+      requestId: string;
+      toolName: string;
+      toolDisplayName: string;
+      success: boolean;
+      summary: string;
     }
   | { kind: 'error'; requestId: string; message: string; recoverable: boolean }
   | { kind: 'aborted'; requestId: string };
@@ -713,4 +731,30 @@ export interface ElectronAPI {
    * 返回 dispose 函数，调用即可取消订阅。
    */
   onChatEvent(callback: (event: ChatEvent) => void): () => void;
+
+  // ── Skill 技能管理 ───────────────────────────────────────────────────────
+
+  /** 获取所有 Skill 状态列表 */
+  skillList(): Promise<SkillListItem[]>;
+
+  /** 启用/禁用指定 Skill */
+  skillToggle(name: string, enabled: boolean): Promise<void>;
+
+  /** 获取联网搜索全局开关 */
+  skillGetWebSearchEnabled(): Promise<boolean>;
+
+  /** 设置联网搜索全局开关 */
+  skillSetWebSearch(enabled: boolean): Promise<void>;
+}
+
+// ── Skill 类型 ────────────────────────────────────────────────────────────
+
+/** Skill 状态列表项（UI 展示用） */
+export interface SkillListItem {
+  name: string;
+  description: string;
+  emoji?: string;
+  builtin: boolean;
+  enabled: boolean;
+  toolCount: number;
 }

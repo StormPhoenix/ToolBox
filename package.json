@@ -7,8 +7,9 @@
     "dev": "concurrently \"pnpm run dev:main\" \"pnpm run dev:shell\"",
     "dev:main": "vite build --config vite.main.config.ts --watch",
     "dev:shell": "vite --config vite.shell.config.ts",
-    "build": "pnpm run build:main && pnpm run build:shell && pnpm run build:plugins && pnpm run build:registry",
+    "build": "pnpm run build:main && pnpm run build:skills && pnpm run build:shell && pnpm run build:plugins && pnpm run build:registry",
     "build:main": "vite build --config vite.main.config.ts",
+    "build:skills": "node scripts/copy-skills.mjs",
     "build:shell": "vite build --config vite.shell.config.ts",
     "build:plugins": "pnpm --filter \"./plugins/**\" run build",
     "build:registry": "node scripts/build-registry.mjs",
@@ -23,6 +24,7 @@
   "license": "MIT",
   "devDependencies": {
     "@toolbox/bridge": "workspace:*",
+    "@types/js-yaml": "^4.0.9",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^20.11.0",
     "@vitejs/plugin-vue": "^5.2.1",
@@ -38,6 +40,7 @@
     "@google/genai": "^1.50.1",
     "exifr": "^7.1.3",
     "highlight.js": "^11.11.1",
+    "js-yaml": "^4.1.1",
     "markdown-it": "^14.1.1",
     "openai": "^6.34.0",
     "sharp": "^0.34.5"

@@ -18,6 +18,11 @@
     "src/renderer/splash.css"
   ],
 
+  // Skill .cjs 脚本必须解包，否则 require() 在 asar 中可能失败
+  "asarUnpack": [
+    "dist/main/skill/builtin-skills/**/*"
+  ],
+
   // ── Windows ──────────────────────────────────────────────────────────────
   "win": {
     "target": [

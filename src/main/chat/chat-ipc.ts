@@ -36,6 +36,7 @@ import {
   type ChatExportInput,
   type ChatExportResult,
 } from './exporter';
+import { getWebSearchEnabled } from '../skill/skill-config';
 import { createLogger } from '../logger';
 
 const log = createLogger('Chat-IPC');
@@ -110,11 +111,13 @@ export function registerChatHandlers(): void {
           `attachments=${input.attachments?.length ?? 0}`
       );
 
+      const enableTools = await getWebSearchEnabled();
       const { requestId, userMessage } = await engine.sendMessage({
         sessionId: input.sessionId,
         userText: input.userText,
         attachments: input.attachments as ChatAttachmentInput[] | undefined,
         onEvent: broadcastEvent,
+        enableTools,
       });
 
       return { requestId, userMessageId: userMessage.id };
@@ -163,10 +166,12 @@ export function registerChatHandlers(): void {
       log.info(
         `chat:regenerate sessionId=${input.sessionId}, targetId=${input.assistantMessageId}`
       );
+      const enableTools = await getWebSearchEnabled();
       return engine.regenerateMessage({
         sessionId: input.sessionId,
         assistantMessageId: input.assistantMessageId,
         onEvent: broadcastEvent,
+        enableTools,
       });
     }
   );
@@ -194,12 +199,14 @@ export function registerChatHandlers(): void {
         `chat:edit-and-resend sessionId=${input.sessionId}, targetId=${input.targetMessageId}, ` +
           `text=${input.newText?.length ?? 0} chars, images=${input.imageRefs?.length ?? 0}`
       );
+      const enableTools = await getWebSearchEnabled();
       return engine.editAndResend({
         sessionId: input.sessionId,
         targetMessageId: input.targetMessageId,
         newText: input.newText,
         imageRefs: input.imageRefs as LLMImageRefBlock[] | undefined,
         onEvent: broadcastEvent,
+        enableTools,
       });
     }
   );

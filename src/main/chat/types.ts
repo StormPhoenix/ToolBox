@@ -6,8 +6,21 @@
  * - IPC 层使用的事件类型 ChatEvent
  * - 与 LLM 层的 LLMMessageParam 相互转换由 chat-engine 负责
  */
-import type { LLMContentBlock, LLMMessageParam, ProviderType } from '../llm/types';
+import type { LLMContentBlock, LLMMessageParam, LLMToolUseBlock, ProviderType } from '../llm/types';
 import type { LLMImageRefBlock } from './image-cache';
+
+// ─── 持久化 tool_result 块 ─────────────────────────────────
+
+/**
+ * 持久化专用的 tool_result 块。
+ * content 统一为 string（JSON 序列化的工具返回值），便于磁盘存储。
+ */
+export interface PersistedToolResultBlock {
+  type: 'tool_result';
+  tool_use_id: string;
+  content: string;
+  is_error?: boolean;
+}
 
 // ─── 会话与消息 ────────────────────────────────────────────
 
@@ -16,19 +29,24 @@ import type { LLMImageRefBlock } from './image-cache';
  *
  * - 运行时（发送 LLM）用 LLMContentBlock（含 image 的 base64）
  * - 持久化到磁盘时，image 块会被替换为 image_ref 块（仅含 cachePath + hash）
- * - 加载回内存后，chat-engine 按 K=3 规则按需还原 base64
+ * - tool_use 块由 assistant 消息产生，tool_result 块由工具执行结果产生
+ * - 加载回内存后，chat-engine 按 K=1 规则按需还原 base64
  *
  * 两种形态共用一个联合以避免双份 ChatMessage 类型。
  */
-export type PersistedContentBlock = LLMContentBlock | LLMImageRefBlock;
+export type PersistedContentBlock =
+  | LLMContentBlock
+  | LLMImageRefBlock
+  | LLMToolUseBlock
+  | PersistedToolResultBlock;
 
 /**
  * 单条消息（持久化结构）。
  *
- * - role=user：content 可能是纯字符串，或 text + image_ref + image 的 block 数组
- * - role=assistant：V1 只会是纯字符串（无 tool_use）
+ * - role=user：content 可能是纯字符串，或 text + image_ref + image + tool_result 的 block 数组
+ * - role=assistant：可能是纯字符串，或 text + tool_use 的 block 数组
  *
- * V1 不存 error 气泡（error 只走事件流显示，不入历史）。
+ * 不存 error 气泡（error 只走事件流显示，不入历史）。
  */
 export interface ChatMessage {
   /** UI 使用的消息 ID（uuid） */
@@ -41,6 +59,11 @@ export interface ChatMessage {
   attachments?: Array<{ name: string; mediaType: string }>;
   /** 本条消息产生时使用的模型快照，便于日后追溯 */
   model?: { provider: ProviderType; model: string };
+  /**
+   * 标记此消息是否为 tool 交互的中间步骤。
+   * regenerate 时据此回溯到完整对话轮次的起点。
+   */
+  toolRoundtrip?: boolean;
 }
 
 /** 单会话完整数据（持久化到 userData/chat-sessions/<id>.json） */
@@ -70,7 +93,7 @@ export interface SessionIndexEntry {
 /**
  * 主进程推送给渲染进程的 Chat 事件（通过 webContents.send('chat:event', ...)）。
  *
- * V1 只含流式对话相关事件；V2 引入工具时再扩 tool-executing / tool-done。
+ * 包含流式对话事件 + 工具调用事件。
  */
 export type ChatEvent =
   | {
@@ -87,6 +110,28 @@ export type ChatEvent =
       /** 新生成的 assistant 消息 ID，渲染进程据此入列 */
       assistantMessageId: string;
       usage?: { input_tokens: number; output_tokens: number };
+    }
+  | {
+      /** 清空前端正在显示的中间文本（工具调用开始前触发） */
+      kind: 'stream-reset';
+      requestId: string;
+    }
+  | {
+      /** 工具开始执行 */
+      kind: 'tool-executing';
+      requestId: string;
+      toolName: string;
+      toolDisplayName: string;
+      toolInput: unknown;
+    }
+  | {
+      /** 工具执行完成 */
+      kind: 'tool-done';
+      requestId: string;
+      toolName: string;
+      toolDisplayName: string;
+      success: boolean;
+      summary: string;
     }
   | {
       kind: 'error';

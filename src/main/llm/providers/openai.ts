@@ -80,9 +80,12 @@ export class OpenAIProvider implements LLMProvider {
     system: LLMSystemParam,
     messages: LLMMessageParam[],
     onText: (delta: string) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    tools?: LLMToolDef[],
+    toolChoice?: LLMToolChoice,
   ): Promise<LLMResponse> {
     const openaiMessages = toOpenAIMessages(flattenSystem(system), messages);
+    const openaiTools = tools?.length ? tools.map(toOpenAITool) : undefined;
 
     const stream = await this.client.chat.completions.create(
       {
@@ -91,6 +94,9 @@ export class OpenAIProvider implements LLMProvider {
         messages: openaiMessages,
         stream: true,
         stream_options: { include_usage: true },
+        tools: openaiTools,
+        tool_choice:
+          openaiTools && toolChoice ? toOpenAIToolChoice(toolChoice) : undefined,
       },
       { signal }
     );
@@ -98,6 +104,12 @@ export class OpenAIProvider implements LLMProvider {
     let fullText = '';
     let finishReason: string | null = null;
     let usage: { input_tokens: number; output_tokens: number } | undefined;
+
+    // 流式 tool_calls fragment 累积（OpenAI 分多个 chunk 发送 tool_calls 的各部分）
+    const toolCallFragments = new Map<
+      number,
+      { id: string; name: string; arguments: string }
+    >();
 
     for await (const chunk of stream) {
       const choice = chunk.choices[0];
@@ -107,6 +119,23 @@ export class OpenAIProvider implements LLMProvider {
           fullText += delta;
           onText(delta);
         }
+
+        // tool_calls delta（流式片段）
+        if (choice.delta?.tool_calls) {
+          for (const tc of choice.delta.tool_calls) {
+            const existing = toolCallFragments.get(tc.index) ?? {
+              id: '',
+              name: '',
+              arguments: '',
+            };
+            if (tc.id) existing.id = tc.id;
+            if (tc.function?.name) existing.name += tc.function.name;
+            if (tc.function?.arguments)
+              existing.arguments += tc.function.arguments;
+            toolCallFragments.set(tc.index, existing);
+          }
+        }
+
         if (choice.finish_reason) {
           finishReason = choice.finish_reason;
         }
@@ -120,17 +149,37 @@ export class OpenAIProvider implements LLMProvider {
       }
     }
 
+    // 组装 content blocks
+    const content: LLMContentBlock[] = [];
+    if (fullText) {
+      content.push({ type: 'text', text: fullText });
+    }
+    for (const [, tc] of toolCallFragments) {
+      let parsedInput: unknown = {};
+      try {
+        parsedInput = JSON.parse(tc.arguments);
+      } catch {
+        /* keep empty */
+      }
+      content.push({
+        type: 'tool_use',
+        id: tc.id,
+        name: tc.name,
+        input: parsedInput,
+      });
+    }
+
     let stopReason: LLMResponse['stop_reason'] = 'end_turn';
     if (finishReason === 'tool_calls') stopReason = 'tool_use';
     else if (finishReason === 'length') stopReason = 'max_tokens';
 
     log.info(
       `streamMessage 完成: finish_reason=${finishReason}, ` +
-        `text=${fullText.length} chars, model=${this.model}`
+        `text=${fullText.length} chars, toolCalls=${toolCallFragments.size}, model=${this.model}`
     );
 
     return {
-      content: fullText ? [{ type: 'text', text: fullText }] : [],
+      content,
       stop_reason: stopReason,
       usage,
     };

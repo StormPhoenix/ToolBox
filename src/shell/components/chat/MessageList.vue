@@ -31,6 +31,13 @@
         @submit-edit="(p) => $emit('submit-edit', p)"
       />
 
+      <!-- 工具调用气泡：搜索中 / 搜索完成 -->
+      <ToolCallBubble
+        v-if="isStreaming && !selectionMode && (toolExecuting || (toolResults && toolResults.length > 0))"
+        :executing="toolExecuting ?? null"
+        :results="toolResults ?? []"
+      />
+
       <!-- 流式气泡：选择态下不展示，避免用户误以为能选 -->
       <StreamingBubble v-if="isStreaming && !selectionMode" :text="streamingText" />
 
@@ -74,25 +81,31 @@ import { ref, nextTick, watch, onMounted, onBeforeUnmount } from 'vue';
 import type { ChatMessage } from '@toolbox/bridge';
 import MessageBubble from './MessageBubble.vue';
 import StreamingBubble from './StreamingBubble.vue';
+import ToolCallBubble from './ToolCallBubble.vue';
 import type { LightboxItem } from './ImageLightbox.vue';
 
 const props = defineProps<{
-  /**
-   * 当前会话 id。用作"初始定位"的触发源，
-   * 比 watch messages 引用更稳定（流式结束时 activeSession 会被整个替换，
-   * 但 sessionId 不变，因此不会误触发初始瞬跳）。
-   */
   sessionId: string | null;
   messages: ChatMessage[];
   streamingText: string;
   isStreaming: boolean;
   errorMessage: string | null;
-  /** 选择态：显示 checkbox 列、禁用流式气泡与错误条 */
   selectionMode?: boolean;
-  /** 判断某条消息是否已选中 */
   isSelected?: (id: string) => boolean;
-  /** 当前正在编辑的消息 id */
   editingMessageId?: string | null;
+  /** 当前正在执行的工具信息 */
+  toolExecuting?: {
+    toolName: string;
+    toolDisplayName: string;
+    toolInput: unknown;
+  } | null;
+  /** 已完成的工具调用结果列表 */
+  toolResults?: Array<{
+    toolName: string;
+    toolDisplayName: string;
+    success: boolean;
+    summary: string;
+  }>;
 }>();
 
 defineEmits<{

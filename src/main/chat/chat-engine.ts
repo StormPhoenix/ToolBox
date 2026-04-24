@@ -1,19 +1,18 @@
 /**
- * ChatEngine — 纯对话引擎（V1，无工具）
+ * ChatEngine — 对话引擎（V2，支持工具调用）
  *
  * 职责：
  * 1. 接收用户消息 + 附件，调用 image-cache 压缩落盘为 imageRef，构造 ChatMessage
- * 2. 运行时把 ChatMessage[] 转换为 LLMMessageParam[]（K=3 历史淡出 + 还原 base64）
- * 3. 通过 Provider.streamMessage 流式调用 LLM，onEvent 推送事件给 IPC 层
- * 4. 持久化 user/assistant 消息
+ * 2. 运行时把 ChatMessage[] 转换为 LLMMessageParam[]（K=1 历史淡出 + 还原 base64）
+ * 3. 通过 Provider.streamMessage 流式调用 LLM（支持 tools），Agent 循环处理 tool_use
+ * 4. 持久化 user/assistant/tool 消息
  * 5. 支持 abort 抢占：同 sessionId 新请求先 abort 旧请求
  * 6. 错误恢复：context_length 错误时从最后一条 user 消息中剥离图片引用
  *
- * K=1 历史淡出规则：
- * - 从消息数组尾部往前扫，最近 1 条"含图消息"的 image_ref 还原为 LLMImageBlock
- * - 更早的 image_ref 降级为文本占位：`[历史图片: <fileName>]`
- * - 一条消息里的多张图作为一个整体（要么全还原、要么全降级）
- * - 目的是避免多图同时送进 LLM 导致视觉注意力串扰（详见 IMAGE_HISTORY_K 常量说明）
+ * Agent 循环（最多 MAX_TOOL_ITERATIONS 轮）：
+ * - LLM 返回 stop_reason='tool_use' → 执行工具 → 把 tool_result 回注 → 继续
+ * - LLM 返回 stop_reason='end_turn' → 输出最终文本 → 结束
+ * - 最后一轮不传 tools，强制 LLM 给出文本回复
  */
 import { randomUUID } from 'crypto';
 import type {
@@ -21,6 +20,9 @@ import type {
   LLMContentBlock,
   LLMTextBlock,
   LLMImageBlock,
+  LLMToolUseBlock,
+  LLMToolResultBlock,
+  LLMToolDef,
 } from '../llm/types';
 import { getSharedLLMRouter } from '../llm/llm-ipc';
 import type {
@@ -28,6 +30,7 @@ import type {
   ChatEvent,
   ChatMessage,
   PersistedContentBlock,
+  PersistedToolResultBlock,
 } from './types';
 import * as store from './session-store';
 import {
@@ -35,12 +38,15 @@ import {
   loadImageBase64,
   type LLMImageRefBlock,
 } from './image-cache';
+import type { SkillRegistry } from '../skill/skill-registry';
 import { createLogger } from '../logger';
 
 const log = createLogger('ChatEngine');
 
 /** 周期性 stall 日志：长时间无响应时提示 */
 const STALL_WARN_INTERVAL_MS = 15_000;
+/** Agent 循环最大工具迭代次数（最后一轮不传 tools 强制 end_turn） */
+const MAX_TOOL_ITERATIONS = 5;
 /**
  * 最近 K 条含图消息保留 base64，更早降级为占位文本。
  *
@@ -67,6 +73,20 @@ function startStallWarning(phase: string, requestId: string): () => void {
 }
 
 export type ChatEventEmitter = (event: ChatEvent) => void;
+
+// ─── SkillRegistry 共享引用 ────────────────────────────────
+
+let sharedSkillRegistry: SkillRegistry | null = null;
+
+/** 由 main.ts 初始化时注入 */
+export function setSharedSkillRegistry(registry: SkillRegistry): void {
+  sharedSkillRegistry = registry;
+}
+
+/** 获取共享 SkillRegistry */
+export function getSharedSkillRegistry(): SkillRegistry | null {
+  return sharedSkillRegistry;
+}
 
 // ─── 活动请求管理 ──────────────────────────────────────────
 
@@ -330,8 +350,10 @@ export async function sendMessage(params: {
   userText: string;
   attachments?: ChatAttachmentInput[];
   onEvent: ChatEventEmitter;
+  /** 是否启用工具调用（联网搜索等） */
+  enableTools?: boolean;
 }): Promise<{ requestId: string; userMessage: ChatMessage }> {
-  const { sessionId, userText, attachments, onEvent } = params;
+  const { sessionId, userText, attachments, onEvent, enableTools } = params;
 
   // 抢占同会话旧请求
   const existing = activeRequests.get(sessionId);
@@ -360,6 +382,7 @@ export async function sendMessage(params: {
     systemPrompt: session.systemPrompt,
     abort,
     onEvent,
+    enableTools: enableTools ?? false,
   });
 
   return { requestId, userMessage };
@@ -368,19 +391,18 @@ export async function sendMessage(params: {
 // ─── 重新生成 ──────────────────────────────────────────────
 
 /**
- * 重新生成某条 assistant 消息：截断从 M（含）到会话末尾的所有消息，
- * 基于截断后的上下文重新调用 LLM 流式生成。
- *
- * 行为与 sendMessage 后半段一致，复用 runStream。
- *
- * @returns requestId + 被丢弃的消息数
+ * 重新生成某条 assistant 消息：
+ * 1. 从目标消息往前回溯，跳过所有 toolRoundtrip=true 的中间步骤
+ * 2. 截断到回溯起点
+ * 3. 基于截断后的上下文重新调用 LLM 流式生成
  */
 export async function regenerateMessage(params: {
   sessionId: string;
   assistantMessageId: string;
   onEvent: ChatEventEmitter;
+  enableTools?: boolean;
 }): Promise<{ requestId: string; discardedCount: number }> {
-  const { sessionId, assistantMessageId, onEvent } = params;
+  const { sessionId, assistantMessageId, onEvent, enableTools } = params;
 
   // 抢占同会话旧请求
   const existing = activeRequests.get(sessionId);
@@ -397,14 +419,19 @@ export async function regenerateMessage(params: {
   if (idx < 0) throw new Error(`消息不存在: ${assistantMessageId}`);
   if (idx === 0) throw new Error('不能重新生成会话的第一条消息');
 
-  const discardedCount = session.messages.length - idx;
-  // 截断：只保留 idx 之前的消息
-  session.messages = session.messages.slice(0, idx);
+  // 回溯：从 idx 往前跳过所有 toolRoundtrip 中间步骤，找到完整对话轮次的起点
+  let truncateIdx = idx;
+  while (truncateIdx > 0 && session.messages[truncateIdx - 1]?.toolRoundtrip) {
+    truncateIdx--;
+  }
+
+  const discardedCount = session.messages.length - truncateIdx;
+  session.messages = session.messages.slice(0, truncateIdx);
   await store.saveSession(session);
 
   log.info(
     `regenerate 截断: sessionId=${sessionId}, targetId=${assistantMessageId}, ` +
-      `discarded=${discardedCount}, remaining=${session.messages.length}`
+      `truncateIdx=${truncateIdx}, discarded=${discardedCount}, remaining=${session.messages.length}`
   );
 
   const requestId = randomUUID();
@@ -418,6 +445,7 @@ export async function regenerateMessage(params: {
     systemPrompt: session.systemPrompt,
     abort,
     onEvent,
+    enableTools: enableTools ?? false,
   });
 
   return { requestId, discardedCount };
@@ -439,8 +467,9 @@ export async function editAndResend(params: {
   newText: string;
   imageRefs?: LLMImageRefBlock[];
   onEvent: ChatEventEmitter;
+  enableTools?: boolean;
 }): Promise<{ requestId: string; userMessageId: string; discardedCount: number }> {
-  const { sessionId, targetMessageId, newText, imageRefs, onEvent } = params;
+  const { sessionId, targetMessageId, newText, imageRefs, onEvent, enableTools } = params;
 
   // 抢占同会话旧请求
   const existing = activeRequests.get(sessionId);
@@ -505,6 +534,7 @@ export async function editAndResend(params: {
     systemPrompt: session.systemPrompt,
     abort,
     onEvent,
+    enableTools: enableTools ?? false,
   });
 
   return { requestId, userMessageId: userMessage.id, discardedCount };
@@ -517,8 +547,9 @@ async function runStream(params: {
   systemPrompt?: string;
   abort: AbortController;
   onEvent: ChatEventEmitter;
+  enableTools: boolean;
 }): Promise<void> {
-  const { requestId, sessionId, history, systemPrompt, abort, onEvent } = params;
+  const { requestId, sessionId, history, systemPrompt, abort, onEvent, enableTools } = params;
   const runStartMs = Date.now();
 
   const router = await getSharedLLMRouter();
@@ -548,78 +579,242 @@ async function runStream(params: {
     activeRequests.delete(sessionId);
     return;
   }
-  const sysParam = systemPrompt?.trim() ? systemPrompt : '';
 
-  let firstTokenMs = 0;
+  // 构建 system prompt：原始 + Skill instructions
+  let fullSystemPrompt = systemPrompt?.trim() || '';
+  const registry = sharedSkillRegistry;
+  const tools: LLMToolDef[] | undefined =
+    enableTools && registry ? registry.getLLMTools() : undefined;
+  const hasTools = tools && tools.length > 0;
+
+  if (hasTools && registry) {
+    const skillInstructions = registry.buildSystemInstructions();
+    if (skillInstructions) {
+      fullSystemPrompt = fullSystemPrompt
+        ? fullSystemPrompt + '\n\n' + skillInstructions
+        : skillInstructions;
+    }
+  }
+
+  // 中间步骤消息，最终一次性持久化
+  const pendingMessages: ChatMessage[] = [];
+  let iter = 0;
+
   const cancelStallWarn = startStallWarning('LLM 流式', requestId);
 
   try {
-    log.info(
-      `streamMessage 开始: sessionId=${sessionId}, requestId=${requestId}, ` +
-        `provider=${router.getProviderName()}, messages=${llmMessages.length}`
-    );
+    while (iter < MAX_TOOL_ITERATIONS && !abort.signal.aborted) {
+      iter++;
+      const isLastIter = iter === MAX_TOOL_ITERATIONS;
+      // 最后一轮不传 tools，强制 LLM 给出文本回复
+      const currentTools = isLastIter ? undefined : tools;
 
-    const response = await provider.streamMessage(
-      sysParam,
-      llmMessages,
-      (delta) => {
-        if (!firstTokenMs) {
-          firstTokenMs = Date.now();
-          log.info(
-            `[ChatTiming] TTFT=${firstTokenMs - runStartMs}ms, requestId=${requestId}`
-          );
+      let firstTokenMs = 0;
+
+      log.info(
+        `streamMessage 开始: sessionId=${sessionId}, requestId=${requestId}, ` +
+          `iter=${iter}/${MAX_TOOL_ITERATIONS}, provider=${router.getProviderName()}, ` +
+          `messages=${llmMessages.length}, tools=${currentTools?.length ?? 0}`
+      );
+
+      const response = await provider.streamMessage(
+        fullSystemPrompt,
+        llmMessages,
+        (delta) => {
+          if (!firstTokenMs) {
+            firstTokenMs = Date.now();
+            log.info(
+              `[ChatTiming] TTFT=${firstTokenMs - runStartMs}ms, iter=${iter}, requestId=${requestId}`
+            );
+          }
+          if (abort.signal.aborted) return;
+          onEvent({ kind: 'stream-chunk', requestId, text: delta });
+        },
+        abort.signal,
+        currentTools,
+        currentTools ? { type: 'auto' } : undefined,
+      );
+
+      if (abort.signal.aborted) {
+        onEvent({ kind: 'aborted', requestId });
+        log.info(`请求被中止: requestId=${requestId}, iter=${iter}`);
+        return;
+      }
+
+      // ── stop_reason: end_turn / max_tokens ──
+      if (
+        response.stop_reason === 'end_turn' ||
+        response.stop_reason === 'max_tokens'
+      ) {
+        const finalText = response.content
+          .filter(isTextBlock)
+          .map((b) => b.text)
+          .join('');
+
+        const assistantMessage: ChatMessage = {
+          id: randomUUID(),
+          role: 'assistant',
+          content: finalText,
+          timestamp: Date.now(),
+        };
+
+        // 一次性持久化所有中间消息 + 最终消息
+        await store.appendMessages(sessionId, [
+          ...pendingMessages,
+          assistantMessage,
+        ]);
+
+        const usage = response.usage
+          ? {
+              input_tokens: response.usage.input_tokens,
+              output_tokens: response.usage.output_tokens,
+            }
+          : undefined;
+
+        cancelStallWarn();
+
+        onEvent({
+          kind: 'stream-end',
+          requestId,
+          text: finalText,
+          assistantMessageId: assistantMessage.id,
+          usage,
+        });
+
+        const duration = Date.now() - runStartMs;
+        log.info(
+          `streamMessage 完成: requestId=${requestId}, 耗时=${duration}ms, iters=${iter}, ` +
+            `text=${finalText.length} chars, usage=${usage ? `in=${usage.input_tokens},out=${usage.output_tokens}` : 'N/A'}`
+        );
+        return;
+      }
+
+      // ── stop_reason: tool_use ──
+      if (response.stop_reason === 'tool_use' && registry) {
+        const toolUseBlocks = response.content.filter(
+          (b): b is LLMToolUseBlock => b.type === 'tool_use'
+        );
+
+        if (toolUseBlocks.length === 0) break;
+
+        // 清前端正在显示的中间文本
+        onEvent({ kind: 'stream-reset', requestId });
+
+        // 持久化 assistant 中间消息（保留完整 content blocks）
+        const assistantMid: ChatMessage = {
+          id: randomUUID(),
+          role: 'assistant',
+          content: response.content as PersistedContentBlock[],
+          timestamp: Date.now(),
+          toolRoundtrip: true,
+        };
+        pendingMessages.push(assistantMid);
+
+        // 追加到 LLM messages
+        llmMessages.push({ role: 'assistant', content: response.content });
+
+        // 逐个执行工具
+        const toolResults: LLMToolResultBlock[] = [];
+
+        for (const toolCall of toolUseBlocks) {
+          const displayName = registry.getToolDisplayName(toolCall.name);
+          onEvent({
+            kind: 'tool-executing',
+            requestId,
+            toolName: toolCall.name,
+            toolDisplayName: displayName,
+            toolInput: toolCall.input,
+          });
+
+          try {
+            const result = await registry.execute(
+              toolCall.name,
+              toolCall.input as Record<string, unknown>
+            );
+            const resultStr =
+              typeof result === 'string' ? result : JSON.stringify(result);
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolCall.id,
+              content: resultStr,
+            });
+            onEvent({
+              kind: 'tool-done',
+              requestId,
+              toolName: toolCall.name,
+              toolDisplayName: displayName,
+              success: true,
+              summary:
+                resultStr.length > 200
+                  ? resultStr.slice(0, 200) + '...'
+                  : resultStr,
+            });
+          } catch (err) {
+            const errMsg = (err as Error).message;
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolCall.id,
+              content: `工具执行失败: ${errMsg}`,
+              is_error: true,
+            });
+            onEvent({
+              kind: 'tool-done',
+              requestId,
+              toolName: toolCall.name,
+              toolDisplayName: displayName,
+              success: false,
+              summary: errMsg,
+            });
+          }
         }
-        // requestId 可能已被抢占；此时直接丢弃 chunk（调用 abort 后通常不会再到这里）
-        if (abort.signal.aborted) return;
-        onEvent({ kind: 'stream-chunk', requestId, text: delta });
-      },
-      abort.signal
-    );
+
+        // 持久化 user(tool_result) 中间消息
+        const userToolMsg: ChatMessage = {
+          id: randomUUID(),
+          role: 'user',
+          content: toolResults.map(
+            (tr): PersistedToolResultBlock => ({
+              type: 'tool_result',
+              tool_use_id: tr.tool_use_id,
+              content:
+                typeof tr.content === 'string'
+                  ? tr.content
+                  : JSON.stringify(tr.content),
+              is_error: tr.is_error,
+            })
+          ),
+          timestamp: Date.now(),
+          toolRoundtrip: true,
+        };
+        pendingMessages.push(userToolMsg);
+
+        // 追加到 LLM messages
+        llmMessages.push({ role: 'user', content: toolResults });
+
+        continue;
+      }
+
+      // 其他 stop_reason → 退出循环
+      break;
+    }
 
     cancelStallWarn();
 
-    if (abort.signal.aborted) {
-      onEvent({ kind: 'aborted', requestId });
-      log.info(`请求被中止: requestId=${requestId}`);
-      return;
-    }
-
-    // 汇总文本
-    const finalText = response.content
-      .filter(isTextBlock)
-      .map((b) => b.text)
-      .join('');
-
-    const assistantMessage: ChatMessage = {
+    // 超出 MAX_TOOL_ITERATIONS fallback
+    const fallbackText = '多次尝试后仍无结果，请换种方式提问。';
+    const fallbackMsg: ChatMessage = {
       id: randomUUID(),
       role: 'assistant',
-      content: finalText,
+      content: fallbackText,
       timestamp: Date.now(),
     };
-
-    // 持久化
-    await store.appendMessages(sessionId, [assistantMessage]);
-
-    const usage = response.usage
-      ? {
-          input_tokens: response.usage.input_tokens,
-          output_tokens: response.usage.output_tokens,
-        }
-      : undefined;
-
+    await store.appendMessages(sessionId, [...pendingMessages, fallbackMsg]);
     onEvent({
       kind: 'stream-end',
       requestId,
-      text: finalText,
-      assistantMessageId: assistantMessage.id,
-      usage,
+      text: fallbackText,
+      assistantMessageId: fallbackMsg.id,
     });
-
-    const duration = Date.now() - runStartMs;
-    log.info(
-      `streamMessage 完成: requestId=${requestId}, 耗时=${duration}ms, ` +
-        `text=${finalText.length} chars, usage=${usage ? `in=${usage.input_tokens},out=${usage.output_tokens}` : 'N/A'}`
-    );
   } catch (err) {
     cancelStallWarn();
 
@@ -632,7 +827,6 @@ async function runStream(params: {
     const friendly = toFriendlyError(err as Error);
     log.warn(`streamMessage 失败: requestId=${requestId}, ${friendly.message}`);
 
-    // context_length 错误 → 剥离最后一条 user 消息的 image_ref，方便用户直接重发文本
     if (friendly.stripImages) {
       try {
         await stripLastUserImages(sessionId);
@@ -648,7 +842,6 @@ async function runStream(params: {
       recoverable: friendly.recoverable,
     });
   } finally {
-    // 只清理仍属于自己的活动记录
     const curr = activeRequests.get(sessionId);
     if (curr?.requestId === requestId) {
       activeRequests.delete(sessionId);

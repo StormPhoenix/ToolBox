@@ -123,4 +123,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('chat:event', listener);
     return () => ipcRenderer.removeListener('chat:event', listener);
   },
+
+  // ── Skill 技能管理 ──────────────────────────────────────
+  skillList: () =>
+    ipcRenderer.invoke('skill:list'),
+
+  skillToggle: (name: string, enabled: boolean) =>
+    ipcRenderer.invoke('skill:toggle', name, enabled),
+
+  skillGetWebSearchEnabled: () =>
+    ipcRenderer.invoke('skill:web-search-enabled'),
+
+  skillSetWebSearch: (enabled: boolean) =>
+    ipcRenderer.invoke('skill:set-web-search', enabled),
 });

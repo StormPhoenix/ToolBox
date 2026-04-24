@@ -12,7 +12,7 @@ const NODE_BUILTINS = [
   'path', 'fs', 'fs/promises', 'os', 'child_process',
   'crypto', 'stream', 'util', 'events', 'url', 'http',
   'https', 'net', 'tls', 'zlib', 'buffer', 'assert',
-  'readline', 'worker_threads', 'perf_hooks', 'v8',
+  'readline', 'worker_threads', 'perf_hooks', 'v8', 'module',
 ];
 
 export default defineConfig({
@@ -37,6 +37,8 @@ export default defineConfig({
         'sharp',
         // exifr 走 CJS 动态路径，external 更稳妥
         'exifr',
+        // js-yaml 纯 JS 但避免 ESM/CJS 互操作问题
+        'js-yaml',
         ...NODE_BUILTINS,
       ],
       output: {

@@ -32,6 +32,21 @@ const streamingText = ref<string>('');
 const currentRequestId = ref<string | null>(null);
 const lastError = ref<string | null>(null);
 
+/** 当前正在执行的工具信息（用于 UI 展示工具调用气泡） */
+const toolExecuting = ref<{
+  toolName: string;
+  toolDisplayName: string;
+  toolInput: unknown;
+} | null>(null);
+
+/** 工具执行完成的结果列表（当前请求周期内累积） */
+const toolResults = ref<Array<{
+  toolName: string;
+  toolDisplayName: string;
+  success: boolean;
+  summary: string;
+}>>([]);
+
 // 选择态
 const selectionMode = ref<boolean>(false);
 const selectedIds = ref<Set<string>>(new Set());
@@ -53,10 +68,38 @@ function handleChatEvent(event: ChatEvent): void {
       streamingText.value += event.text;
       break;
 
+    case 'stream-reset':
+      // 工具调用开始前清空正在显示的中间文本
+      streamingText.value = '';
+      break;
+
+    case 'tool-executing':
+      toolExecuting.value = {
+        toolName: event.toolName,
+        toolDisplayName: event.toolDisplayName,
+        toolInput: event.toolInput,
+      };
+      break;
+
+    case 'tool-done':
+      toolExecuting.value = null;
+      toolResults.value = [
+        ...toolResults.value,
+        {
+          toolName: event.toolName,
+          toolDisplayName: event.toolDisplayName,
+          success: event.success,
+          summary: event.summary,
+        },
+      ];
+      break;
+
     case 'stream-end': {
       streamingText.value = '';
       currentRequestId.value = null;
       lastError.value = null;
+      toolExecuting.value = null;
+      toolResults.value = [];
       // 从主进程重新加载会话：把乐观版本的 image 块替换为已落盘的 image_ref
       // 同时追加刚生成的 assistant 消息（主进程已持久化）
       if (activeSession.value) {
@@ -76,6 +119,8 @@ function handleChatEvent(event: ChatEvent): void {
       lastError.value = event.message;
       streamingText.value = '';
       currentRequestId.value = null;
+      toolExecuting.value = null;
+      toolResults.value = [];
       // 错误后也重新加载一次：主进程可能已剥离图片引用
       if (activeSession.value) {
         const id = activeSession.value.id;
@@ -88,10 +133,10 @@ function handleChatEvent(event: ChatEvent): void {
       break;
 
     case 'aborted':
-      // 若已有部分文本，将其作为 assistant 消息保留（主进程此时不入库，
-      // 因此这里仅用于 UI：清空正在生成，不 push 到 messages）
       streamingText.value = '';
       currentRequestId.value = null;
+      toolExecuting.value = null;
+      toolResults.value = [];
       break;
   }
 }
@@ -472,10 +517,16 @@ export function useChat() {
     // state (readonly refs)
     sessions,
     activeSession,
-    messages: computed(() => activeSession.value?.messages ?? []),
+    messages: computed(() =>
+      (activeSession.value?.messages ?? []).filter((m) => !m.toolRoundtrip)
+    ),
     streamingText,
     isStreaming: computed(() => currentRequestId.value !== null),
     lastError,
+
+    // tool call state
+    toolExecuting,
+    toolResults,
 
     // selection state
     selectionMode,
