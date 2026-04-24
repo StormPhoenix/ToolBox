@@ -31,8 +31,11 @@ ToolBox/
 │   │   ├── logger.ts                 # 主进程日志工具（文件持久化、EPIPE 保护）
 │   │   ├── llm/                      # LLM 框架（主进程侧）
 │   │   │   ├── types.ts              # 统一 LLM 类型（Provider 接口、配置类型等）
-│   │   │   ├── router.ts             # LLMRouter — Provider 路由与生命周期管理
-│   │   │   ├── llm-ipc.ts            # IPC handler 注册（registerLLMHandlers）
+│   │   │   ├── router.ts             # LLMRouter — Provider 路由 + withScene 上下文 + DumpingProvider 包装
+│   │   │   ├── llm-ipc.ts            # IPC handler 注册（LLM + Debug 调试 IPC 合并）
+│   │   │   ├── debug-config.ts       # 调试配置持久化（userData/debug-config.json）
+│   │   │   ├── prompt-dumper.ts      # LLM 请求/响应 dump 到 userData/llm-dumps/YYYY-MM-DD/（单文件）
+│   │   │   ├── dumping-provider.ts   # LLMProvider 代理：自动 dump createMessage / streamMessage / generateImage
 │   │   │   └── providers/
 │   │   │       ├── claude.ts         # ClaudeProvider（@anthropic-ai/sdk）
 │   │   │       ├── openai.ts         # OpenAIProvider（openai SDK，兼容第三方）
@@ -42,7 +45,7 @@ ToolBox/
 │   │   │   ├── session-store.ts      # 会话持久化（userData/chat-sessions/）
 │   │   │   ├── image-cache.ts        # 图片压缩 + MD5 去重 + 孤儿清理（userData/chat-images/）
 │   │   │   ├── image-protocol.ts     # toolbox-img:// 自定义协议注册
-│   │   │   ├── chat-engine.ts        # 抢占式流式引擎 + K=3 历史淡出 + 错误剥离图片
+│   │   │   ├── chat-engine.ts        # 抢占式流式引擎 + K=3 历史淡出 + 错误剥离图片 + Agent 循环
 │   │   │   └── chat-ipc.ts           # IPC handlers + 事件广播
 │   │   └── image-resize/             # 图像分辨率调整框架（主进程侧，sharp + exifr）
 │   │       ├── types.ts              # ResizeProvider 接口、Options、Response 等
@@ -279,6 +282,9 @@ Skill 是为 LLM Chat 对话提供**工具调用能力**的声明式扩展机制
 | `skillOpenDir()` | `skill:open-dir` | 在资源管理器中打开用户 Skill 目录 `userData/skills/`（不存在时自动创建） |
 | `skillListTrusted()` | `skill:list-trusted` | 获取所有永久信任工具列表（含 toolName / displayName / skillName） |
 | `skillUntrust(toolName)` | `skill:untrust` | 撤销某工具的永久信任，下次调用会重新弹窗 |
+| `debugGetConfig()` | `debug:get-config` | 获取当前调试配置（含 `promptDump.enabled` / `maxFilesPerDay`） |
+| `debugSetConfig(config)` | `debug:set-config` | 更新调试配置（立即生效 + 持久化到 `userData/debug-config.json`） |
+| `debugOpenDumpDir()` | `debug:open-dump-dir` | 在资源管理器中打开 LLM dump 根目录 `userData/llm-dumps/` |
 
 **新增 IPC 通道三步骤：**
 1. `src/main/main.ts` — `ipcMain.handle('channel', handler)`
@@ -466,6 +472,7 @@ const msg = buildMultiImageMessage(
 | `docs/design/llm-chat-design.md` | 需求/设计 | LLM Chat 对话功能（V1 纯对话）：引擎架构、IPC、UI 布局 |
 | `docs/tech/llm-framework.md` | 技术 | LLM 框架架构、Provider 配置、插件调用指南 |
 | `docs/tech/skill-system.md` | 技术 | Skill 系统架构：SKILL.md 规范、11 个内置 Skill、两级风险体系、确认弹窗、打包策略 |
+| `docs/tech/llm-debug.md` | 技术 | LLM 调试与 Prompt Dump：文件结构、典型排查场景、安全隐私说明 |
 
 > 新增文档后请在此表登记。
 
@@ -546,3 +553,4 @@ const msg = buildMultiImageMessage(
 - ⚠️ **Skill 系统在 `app.whenReady()` 时初始化**：`main.ts` 创建 `SkillRegistry` 并通过 `setSharedSkillRegistry()` 注入给 chat-engine；`initializeSkillSystem()` 负责扫描内置 + 用户目录、应用 `disabled`/`trustedTools` 配置、注册 IPC
 - ⚠️ **Skill `.cjs` 脚本必须解包**：`electron-builder.json5` 的 `asarUnpack` 已包含 `dist/main/skill/builtin-skills/**/*`，生产环境从 `process.resourcesPath/app.asar.unpacked/...` 加载
 - ⚠️ **MODERATE 工具的确认拦截在 chat-engine 中实现**：通过 `pendingConfirmations` Map + `resolveConfirmation()` 函数串联 IPC 往返；用户点"永久信任"时会同时写入 Registry 内存和 `skill-config.json`
+- ⚠️ **PromptDumper 覆盖所有 LLM 调用**：`LLMRouter.getProvider()` 返回的是 `DumpingProvider` 代理，自动 dump 所有 `createMessage` / `streamMessage` / `generateImage` 调用。调用方通过 `router.withScene('scene-name', { requestId, sessionId, iteration })` 设置上下文，若未设置则 scene 为 `'unknown'`。开发环境默认开启，生产默认关闭。详见 [`docs/tech/llm-debug.md`](docs/tech/llm-debug.md)

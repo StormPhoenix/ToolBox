@@ -772,6 +772,17 @@ export interface ElectronAPI {
 
   /** 撤销某工具的永久信任 */
   skillUntrust(toolName: string): Promise<void>;
+
+  // ── Debug（开发者调试：LLM prompt dump）──────────────────────────────
+
+  /** 获取当前调试配置 */
+  debugGetConfig(): Promise<DebugConfigData>;
+
+  /** 更新调试配置（立即生效 + 持久化） */
+  debugSetConfig(config: DebugConfigData): Promise<void>;
+
+  /** 在资源管理器中打开 LLM dump 根目录 */
+  debugOpenDumpDir(): Promise<void>;
 }
 
 // ── Skill 类型 ────────────────────────────────────────────────────────────
@@ -791,4 +802,25 @@ export interface TrustedToolItem {
   toolName: string;
   displayName: string;
   skillName: string;
+}
+
+// ── Debug 类型 ────────────────────────────────────────────────────────────
+
+/**
+ * 调试配置（持久化在 userData/debug-config.json）。
+ *
+ * 当前仅含 promptDump 一项，未来可扩展其他调试开关。
+ */
+export interface DebugConfigData {
+  promptDump: {
+    /**
+     * 是否启用 LLM prompt/response dump。
+     * - 开发环境（未打包）默认 true
+     * - 生产环境默认 false
+     * - 启用后每次 LLM 调用会在 userData/llm-dumps/YYYY-MM-DD/ 下生成 JSON 文件
+     */
+    enabled: boolean;
+    /** 单日最多保留的 dump 文件数（超过自动清理最旧的），默认 200 */
+    maxFilesPerDay: number;
+  };
 }

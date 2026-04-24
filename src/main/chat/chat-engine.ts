@@ -676,6 +676,9 @@ async function runStream(params: {
           `messages=${llmMessages.length}, tools=${currentTools?.length ?? 0}`
       );
 
+      // 为本次调用设置 scene 上下文（Router 代理会自动 dump 请求/响应到磁盘）
+      router.withScene('main-chat', { requestId, sessionId, iteration: iter });
+
       const response = await provider.streamMessage(
         systemParam,
         llmMessages,

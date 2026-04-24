@@ -247,6 +247,58 @@
           </div>
         </Transition>
       </section>
+
+      <!-- 开发者调试区块 -->
+      <section class="settings-section">
+        <div class="section-header">
+          <span class="section-icon">🔧</span>
+          <div>
+            <h2 class="section-title">开发者调试</h2>
+            <p class="section-desc">
+              LLM 调用过程的调试工具，帮助开发者排查问题。
+            </p>
+          </div>
+        </div>
+
+        <!-- LLM Prompt Dump 开关 -->
+        <div class="debug-row">
+          <div class="debug-info">
+            <div class="debug-row-title">记录 LLM 请求 / 响应到文件</div>
+            <div class="debug-desc">
+              开启后每次对话的完整请求、响应都会以 JSON 形式写入本地目录，方便回看和排查。
+              <br />
+              <span class="debug-warn">
+                ⚠️ 会把对话完整内容写入磁盘，包含你粘贴的任何代码 / 文件 / 剪贴板内容。仅建议调试时开启。
+              </span>
+            </div>
+          </div>
+          <div
+            v-if="debugConfig"
+            class="skill-toggle"
+            :class="{ on: debugConfig.promptDump.enabled }"
+            @click="onTogglePromptDump"
+            :title="debugConfig.promptDump.enabled ? '点击关闭' : '点击开启'"
+          >
+            <div class="skill-toggle-thumb"></div>
+          </div>
+        </div>
+
+        <!-- 打开 dump 目录 -->
+        <div class="skill-dir-row">
+          <button class="btn btn--secondary" @click="onOpenDumpDir">
+            📁 打开调试日志目录
+          </button>
+          <span class="debug-path">userData / llm-dumps / YYYY-MM-DD /</span>
+        </div>
+
+        <!-- 操作提示 -->
+        <Transition name="fade">
+          <div v-if="debugToast" class="test-result ok">
+            <span class="test-icon">✓</span>
+            <span>{{ debugToast }}</span>
+          </div>
+        </Transition>
+      </section>
     </div>
   </div>
 </template>
@@ -258,6 +310,7 @@ import type {
   LLMConfigInput,
   SkillListItem,
   TrustedToolItem,
+  DebugConfigData,
 } from '@toolbox/bridge';
 
 interface ProviderFormItem {
@@ -552,7 +605,62 @@ function showSkillToast(msg: string): void {
 onMounted(() => {
   void reloadSkills();
   void reloadTrustedTools();
+  void reloadDebugConfig();
 });
+
+// ── 开发者调试 ──────────────────────────────────────────────
+
+const debugConfig = ref<DebugConfigData | null>(null);
+const debugToast = ref<string | null>(null);
+let debugToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function reloadDebugConfig(): Promise<void> {
+  try {
+    debugConfig.value = await window.electronAPI.debugGetConfig();
+  } catch {
+    debugConfig.value = null;
+  }
+}
+
+async function onTogglePromptDump(): Promise<void> {
+  if (!debugConfig.value) return;
+  const next: DebugConfigData = {
+    ...debugConfig.value,
+    promptDump: {
+      ...debugConfig.value.promptDump,
+      enabled: !debugConfig.value.promptDump.enabled,
+    },
+  };
+  // 乐观更新
+  debugConfig.value = next;
+  try {
+    await window.electronAPI.debugSetConfig(next);
+    showDebugToast(`LLM 调试日志已${next.promptDump.enabled ? '开启' : '关闭'}`);
+  } catch (err) {
+    // 失败回滚
+    debugConfig.value = {
+      ...next,
+      promptDump: { ...next.promptDump, enabled: !next.promptDump.enabled },
+    };
+    showDebugToast(`操作失败: ${(err as Error).message}`);
+  }
+}
+
+async function onOpenDumpDir(): Promise<void> {
+  try {
+    await window.electronAPI.debugOpenDumpDir();
+  } catch (err) {
+    showDebugToast(`打开目录失败: ${(err as Error).message}`);
+  }
+}
+
+function showDebugToast(msg: string): void {
+  debugToast.value = msg;
+  if (debugToastTimer) clearTimeout(debugToastTimer);
+  debugToastTimer = setTimeout(() => {
+    debugToast.value = null;
+  }, 2000);
+}
 </script>
 
 <style scoped>
@@ -1069,5 +1177,47 @@ onMounted(() => {
   background: var(--bg-card-hover);
   color: var(--danger, #c44);
   border-color: var(--danger, #c44);
+}
+
+/* ── 开发者调试区块 ── */
+.debug-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--bg-content);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.debug-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.debug-row-title {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.debug-desc {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.debug-warn {
+  display: inline-block;
+  margin-top: 4px;
+  color: #d49a3b;
+  font-size: 0.75rem;
+}
+
+.debug-path {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-family: 'Menlo', 'Consolas', monospace;
 }
 </style>

@@ -9,8 +9,9 @@
  *
  * 在 main.ts 中调用 registerLLMHandlers(ipcMain) 即可完成注册。
  */
-import { ipcMain, app } from 'electron';
+import { ipcMain, app, shell } from 'electron';
 import * as fs from 'fs/promises';
+import { existsSync, mkdirSync } from 'fs';
 import * as path from 'path';
 import { LLMRouter } from './router';
 import type {
@@ -23,6 +24,13 @@ import type {
   LLMImageGenResult,
   ProviderType,
 } from './types';
+import {
+  readDebugConfig,
+  writeDebugConfig,
+  getDumpRootDir,
+  type DebugConfigData,
+} from './debug-config';
+import { setDumpEnabled } from './prompt-dumper';
 import { createLogger } from '../logger';
 
 const log = createLogger('LLM-IPC');
@@ -146,10 +154,11 @@ export function registerLLMHandlers(): void {
           `provider=${r.getProviderName()}`
       );
 
-      const response = await provider.createMessage(
-        options?.system ?? '',
-        messages
-      );
+      // 设置 scene 上下文后立即调用（withScene 返回 this 以便链式）
+      const response = await r
+        .withScene('plugin-llmchat')
+        .getProvider()!
+        .createMessage(options?.system ?? '', messages);
 
       const text = response.content
         .filter((b): b is import('./types').LLMTextBlock => b.type === 'text')
@@ -242,9 +251,10 @@ export function registerLLMHandlers(): void {
 
       try {
         log.info(`测试连接: ${r.getProviderName()}`);
-        const response = await provider.createMessage('', [
-          { role: 'user', content: 'Hi' },
-        ]);
+        const response = await r
+          .withScene('connection-test')
+          .getProvider()!
+          .createMessage('', [{ role: 'user', content: 'Hi' }]);
         const hasText = response.content.some((b) => b.type === 'text');
         if (!hasText) throw new Error('返回内容为空');
         // 打印返回信息
@@ -281,7 +291,10 @@ export function registerLLMHandlers(): void {
           `provider=${r.getProviderName()}`
       );
 
-      const result = await provider.generateImage(options);
+      const result = await r
+        .withScene('plugin-image-gen')
+        .getProvider()!
+        .generateImage!(options);
 
       log.info(
         `llm:generate-image 完成: images=${result.images.length}, ` +
@@ -291,6 +304,35 @@ export function registerLLMHandlers(): void {
       return result;
     }
   );
+
+  // ── debug:get-config ──────────────────────────────
+  ipcMain.handle('debug:get-config', async (): Promise<DebugConfigData> => {
+    return readDebugConfig();
+  });
+
+  // ── debug:set-config ──────────────────────────────
+  ipcMain.handle(
+    'debug:set-config',
+    async (_e, config: DebugConfigData): Promise<void> => {
+      await writeDebugConfig(config);
+      // 立即生效到 dumper 内存缓存
+      setDumpEnabled(config.promptDump.enabled);
+      log.info(
+        `调试配置更新: promptDumpEnabled=${config.promptDump.enabled}`
+      );
+    }
+  );
+
+  // ── debug:open-dump-dir ───────────────────────────
+  // 在资源管理器中打开 LLM dump 根目录（不存在时自动创建）
+  ipcMain.handle('debug:open-dump-dir', async (): Promise<void> => {
+    const dir = getDumpRootDir();
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    await shell.openPath(dir);
+    log.info(`打开 dump 目录: ${dir}`);
+  });
 
   log.info('LLM IPC handlers 已注册');
 }

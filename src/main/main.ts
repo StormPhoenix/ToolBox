@@ -12,6 +12,7 @@ import { registerLLMHandlers } from './llm/llm-ipc';
 import { registerImageResizeHandlers } from './image-resize/image-ipc';
 import { registerChatHandlers } from './chat/chat-ipc';
 import { setSharedSkillRegistry } from './chat/chat-engine';
+import { initializePromptDumper } from './llm/prompt-dumper';
 import { SkillRegistry } from './skill/skill-registry';
 import { initializeSkillSystem } from './skill/skill-ipc';
 import {
@@ -197,6 +198,11 @@ app.whenReady().then(() => {
   registerImageResizeHandlers();
   registerChatHandlers();
   registerImageProtocolHandler();
+
+  // 初始化 Prompt Dumper（读取配置 + 异步清理过期 dump 目录）
+  void initializePromptDumper().catch((err) =>
+    log.warn(`PromptDumper 初始化异常: ${(err as Error).message}`)
+  );
 
   // 初始化 Skill 系统（加载 builtin + user skills → 注入到 ChatEngine）
   const skillRegistry = new SkillRegistry();

@@ -142,4 +142,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   skillUntrust: (toolName: string) =>
     ipcRenderer.invoke('skill:untrust', toolName),
+
+  // ── Debug（开发者调试：LLM prompt dump）──────────────────
+  debugGetConfig: () =>
+    ipcRenderer.invoke('debug:get-config'),
+
+  debugSetConfig: (config: unknown) =>
+    ipcRenderer.invoke('debug:set-config', config),
+
+  debugOpenDumpDir: () =>
+    ipcRenderer.invoke('debug:open-dump-dir'),
 });
