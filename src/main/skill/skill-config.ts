@@ -2,7 +2,11 @@
  * SkillConfig — Skill 启用/禁用配置持久化
  *
  * 存储在 userData/skill-config.json
- * 格式: { disabled: string[], webSearchEnabled: boolean }
+ * 格式: { disabled: string[] }
+ *
+ * 语义说明：
+ * - 是否使用联网搜索完全由对应 Skill（web-search）的启用状态决定
+ * - 禁用 Skill ⇒ chat-engine 不会把其工具传给 LLM
  */
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
@@ -15,8 +19,6 @@ const log = createLogger('SkillConfig');
 interface SkillConfigData {
   /** 被禁用的 Skill 名称列表（黑名单模式：默认全部启用） */
   disabled: string[];
-  /** 联网搜索全局开关（默认 true） */
-  webSearchEnabled: boolean;
 }
 
 function getConfigPath(): string {
@@ -25,7 +27,6 @@ function getConfigPath(): string {
 
 const DEFAULT_CONFIG: SkillConfigData = {
   disabled: [],
-  webSearchEnabled: true,
 };
 
 export async function readSkillConfig(): Promise<SkillConfigData> {
@@ -36,7 +37,6 @@ export async function readSkillConfig(): Promise<SkillConfigData> {
     const data = JSON.parse(raw) as Partial<SkillConfigData>;
     return {
       disabled: data.disabled ?? [],
-      webSearchEnabled: data.webSearchEnabled ?? true,
     };
   } catch (err) {
     log.warn('读取 skill-config.json 失败，使用默认配置:', err);
@@ -72,19 +72,4 @@ export async function toggleSkill(
     }
   }
   await writeSkillConfig(config);
-}
-
-/** 设置联网搜索全局开关 */
-export async function setWebSearchEnabled(
-  enabled: boolean
-): Promise<void> {
-  const config = await readSkillConfig();
-  config.webSearchEnabled = enabled;
-  await writeSkillConfig(config);
-}
-
-/** 获取联网搜索全局开关 */
-export async function getWebSearchEnabled(): Promise<boolean> {
-  const config = await readSkillConfig();
-  return config.webSearchEnabled;
 }

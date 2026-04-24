@@ -131,9 +131,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   skillToggle: (name: string, enabled: boolean) =>
     ipcRenderer.invoke('skill:toggle', name, enabled),
 
-  skillGetWebSearchEnabled: () =>
-    ipcRenderer.invoke('skill:web-search-enabled'),
-
-  skillSetWebSearch: (enabled: boolean) =>
-    ipcRenderer.invoke('skill:set-web-search', enabled),
+  skillOpenDir: () =>
+    ipcRenderer.invoke('skill:open-dir'),
 });

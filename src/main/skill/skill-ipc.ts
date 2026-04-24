@@ -4,19 +4,15 @@
  * 注册以下 IPC 通道：
  *   skill:list         — 获取所有 Skill 状态列表
  *   skill:toggle       — 启用/禁用指定 Skill
- *   skill:web-search-enabled   — 获取联网搜索全局开关
- *   skill:set-web-search       — 设置联网搜索全局开关
+ *   skill:open-dir     — 在资源管理器中打开用户 Skill 目录
  *
  * 在 main.ts 中调用 registerSkillHandlers() 完成注册。
  */
-import { ipcMain } from 'electron';
+import { ipcMain, shell, app } from 'electron';
+import * as path from 'path';
+import { existsSync, mkdirSync } from 'fs';
 import type { SkillRegistry } from './skill-registry';
-import {
-  readSkillConfig,
-  toggleSkill,
-  getWebSearchEnabled,
-  setWebSearchEnabled,
-} from './skill-config';
+import { readSkillConfig, toggleSkill } from './skill-config';
 import { createLogger } from '../logger';
 
 const log = createLogger('Skill-IPC');
@@ -47,19 +43,16 @@ export function registerSkillHandlers(registry: SkillRegistry): void {
     }
   );
 
-  // ── skill:web-search-enabled ──────────────────────────
-  ipcMain.handle('skill:web-search-enabled', async () => {
-    return getWebSearchEnabled();
-  });
-
-  // ── skill:set-web-search ──────────────────────────────
-  ipcMain.handle(
-    'skill:set-web-search',
-    async (_e, enabled: boolean) => {
-      await setWebSearchEnabled(enabled);
-      log.info(`联网搜索全局开关: ${enabled}`);
+  // ── skill:open-dir ────────────────────────────────────
+  // 在资源管理器中打开用户 Skill 目录（如目录不存在则先创建）
+  ipcMain.handle('skill:open-dir', async () => {
+    const userSkillsDir = path.join(app.getPath('userData'), 'skills');
+    if (!existsSync(userSkillsDir)) {
+      mkdirSync(userSkillsDir, { recursive: true });
     }
-  );
+    await shell.openPath(userSkillsDir);
+    log.info(`打开 Skill 目录: ${userSkillsDir}`);
+  });
 
   log.info('Skill IPC handlers 已注册');
 }

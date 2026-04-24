@@ -740,11 +740,8 @@ export interface ElectronAPI {
   /** 启用/禁用指定 Skill */
   skillToggle(name: string, enabled: boolean): Promise<void>;
 
-  /** 获取联网搜索全局开关 */
-  skillGetWebSearchEnabled(): Promise<boolean>;
-
-  /** 设置联网搜索全局开关 */
-  skillSetWebSearch(enabled: boolean): Promise<void>;
+  /** 在资源管理器中打开用户 Skill 目录（不存在时自动创建） */
+  skillOpenDir(): Promise<void>;
 }
 
 // ── Skill 类型 ────────────────────────────────────────────────────────────

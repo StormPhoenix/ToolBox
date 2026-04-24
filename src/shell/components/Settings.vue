@@ -146,13 +146,88 @@
           </div>
         </Transition>
       </section>
+
+      <!-- 技能扩展区块 -->
+      <section class="settings-section">
+        <div class="section-header">
+          <span class="section-icon">🧩</span>
+          <div>
+            <h2 class="section-title">技能扩展</h2>
+            <p class="section-desc">
+              为 AI 对话提供扩展能力。启用后 AI 会根据对话上下文自动调用对应工具。
+            </p>
+          </div>
+        </div>
+
+        <!-- 技能列表 -->
+        <div v-if="skillsLoading" class="skill-loading">加载中…</div>
+        <div v-else-if="skills.length === 0" class="skill-empty">
+          暂无可用技能
+        </div>
+        <div v-else class="skill-list">
+          <div
+            v-for="skill in skills"
+            :key="skill.name"
+            class="skill-row"
+            @click="onToggleSkill(skill)"
+          >
+            <div class="skill-emoji">{{ skill.emoji || '🔧' }}</div>
+            <div class="skill-info">
+              <div class="skill-row-title">
+                <span class="skill-name">{{ skill.name }}</span>
+                <span
+                  class="skill-badge"
+                  :class="skill.builtin ? 'badge-builtin' : 'badge-user'"
+                >
+                  {{ skill.builtin ? '内置' : '用户' }}
+                </span>
+              </div>
+              <div class="skill-desc">{{ skill.description }}</div>
+              <div class="skill-meta">
+                {{ skill.toolCount }} 个工具
+              </div>
+            </div>
+            <div
+              class="skill-toggle"
+              :class="{ on: skill.enabled }"
+              @click.stop="onToggleSkill(skill)"
+              :title="skill.enabled ? '点击禁用' : '点击启用'"
+            >
+              <div class="skill-toggle-thumb"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 打开技能目录 -->
+        <div class="skill-dir-row">
+          <button class="btn btn--secondary" @click="onOpenSkillDir">
+            📁 打开技能目录
+          </button>
+          <div class="tooltip-wrapper">
+            <span class="tooltip-trigger">?</span>
+            <div class="tooltip-content">
+              把 Skill 目录放入此目录即可自动加载。<br />
+              每个 Skill 需包含 SKILL.md 文件。<br />
+              重启应用后生效。
+            </div>
+          </div>
+        </div>
+
+        <!-- Skill 操作提示 -->
+        <Transition name="fade">
+          <div v-if="skillToast" class="test-result ok">
+            <span class="test-icon">✓</span>
+            <span>{{ skillToast }}</span>
+          </div>
+        </Transition>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, reactive, watch, onMounted } from 'vue';
-import type { LLMProviderType, LLMConfigInput } from '@toolbox/bridge';
+import type { LLMProviderType, LLMConfigInput, SkillListItem } from '@toolbox/bridge';
 
 interface ProviderFormItem {
   apiKey: string;
@@ -362,6 +437,67 @@ function hasUnsavedChanges(): boolean {
   }
   return false;
 }
+
+// ── Skill 技能管理 ─────────────────────────────────────────
+
+const skills = ref<SkillListItem[]>([]);
+const skillsLoading = ref(false);
+const skillToast = ref<string | null>(null);
+let skillToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function reloadSkills(): Promise<void> {
+  skillsLoading.value = true;
+  try {
+    skills.value = await window.electronAPI.skillList();
+  } catch {
+    skills.value = [];
+  } finally {
+    skillsLoading.value = false;
+  }
+}
+
+async function onToggleSkill(skill: SkillListItem): Promise<void> {
+  const next = !skill.enabled;
+  // 乐观更新
+  const idx = skills.value.findIndex((s) => s.name === skill.name);
+  if (idx >= 0) {
+    skills.value = skills.value.map((s, i) =>
+      i === idx ? { ...s, enabled: next } : s
+    );
+  }
+  try {
+    await window.electronAPI.skillToggle(skill.name, next);
+    showSkillToast(`${skill.name} 已${next ? '启用' : '禁用'}`);
+  } catch (err) {
+    // 失败回滚
+    if (idx >= 0) {
+      skills.value = skills.value.map((s, i) =>
+        i === idx ? { ...s, enabled: skill.enabled } : s
+      );
+    }
+    showSkillToast(`操作失败: ${(err as Error).message}`);
+  }
+}
+
+async function onOpenSkillDir(): Promise<void> {
+  try {
+    await window.electronAPI.skillOpenDir();
+  } catch (err) {
+    showSkillToast(`打开目录失败: ${(err as Error).message}`);
+  }
+}
+
+function showSkillToast(msg: string): void {
+  skillToast.value = msg;
+  if (skillToastTimer) clearTimeout(skillToastTimer);
+  skillToastTimer = setTimeout(() => {
+    skillToast.value = null;
+  }, 2000);
+}
+
+onMounted(() => {
+  void reloadSkills();
+});
 </script>
 
 <style scoped>
@@ -608,5 +744,199 @@ function hasUnsavedChanges(): boolean {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* ── Skill 列表 ── */
+.skill-loading,
+.skill-empty {
+  padding: 20px 0;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--text-dim);
+}
+
+.skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.skill-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--bg-content);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.skill-row:hover {
+  background: var(--bg-card-hover);
+}
+
+.skill-emoji {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.skill-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.skill-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skill-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.skill-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  border-radius: 999px;
+  line-height: 1.4;
+}
+
+.badge-builtin {
+  background: var(--bg-active);
+  color: var(--accent-light);
+  border: 1px solid var(--border-active);
+}
+
+.badge-user {
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.skill-desc {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.skill-meta {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+/* ── Toggle 开关 ── */
+.skill-toggle {
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--border);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.skill-toggle.on {
+  background: var(--accent);
+}
+
+.skill-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.skill-toggle.on .skill-toggle-thumb {
+  transform: translateX(16px);
+}
+
+/* ── 打开目录 + Tooltip ── */
+.skill-dir-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tooltip-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.tooltip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--bg-content);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: help;
+  user-select: none;
+}
+
+.tooltip-wrapper:hover .tooltip-trigger {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.tooltip-content {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 10;
+}
+
+.tooltip-wrapper:hover .tooltip-content {
+  opacity: 1;
+  pointer-events: auto;
 }
 </style>
