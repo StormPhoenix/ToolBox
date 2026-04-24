@@ -290,6 +290,65 @@ function selectAll(): void {
   selectedIds.value = next;
 }
 
+// ─── 重新生成（V1.2） ─────────────────────────────────────
+
+/**
+ * 重新生成指定 assistant 消息。
+ *
+ * 行为：
+ * 1. 截断该消息（含）及之后所有消息
+ * 2. 基于截断后的上下文调用 LLM 流式生成
+ * 3. 流式事件复用 chat:event，与 send 完全一致
+ *
+ * 确认策略（Q2-b）：
+ * - 如果 M 是最后一条 assistant → 直接执行
+ * - 如果 M 之后还有消息 → confirm 提示用户
+ *
+ * 前置条件：
+ * - 非流式状态（isStreaming === false）
+ * - activeSession 存在
+ */
+async function regenerateMessage(assistantMessageId: string): Promise<void> {
+  if (!activeSession.value) return;
+  if (currentRequestId.value) return; // 流式中禁止
+
+  const msgs = activeSession.value.messages;
+  const idx = msgs.findIndex((m) => m.id === assistantMessageId);
+  if (idx < 0) return;
+
+  const tailCount = msgs.length - idx - 1;
+  if (
+    tailCount > 0 &&
+    !confirm(
+      `将丢弃后续 ${tailCount} 条消息并重新生成此回答，无法撤销。继续？`
+    )
+  ) {
+    return;
+  }
+
+  // 乐观截断前端数组（UX 即时反馈）
+  activeSession.value.messages = msgs.slice(0, idx);
+  lastError.value = null;
+
+  try {
+    const result = await window.electronAPI.chatRegenerate({
+      sessionId: activeSession.value.id,
+      assistantMessageId,
+    });
+    currentRequestId.value = result.requestId;
+  } catch (err) {
+    // 截断已持久化（主进程先写盘再返回），但流式启动失败时仍需重载
+    lastError.value = (err as Error).message;
+    if (activeSession.value) {
+      const id = activeSession.value.id;
+      const fresh = await window.electronAPI.chatLoadSession(id);
+      if (fresh && activeSession.value?.id === id) {
+        activeSession.value = fresh;
+      }
+    }
+  }
+}
+
 // ─── 导出 composable ──────────────────────────────────────
 
 export function useChat() {
@@ -331,6 +390,9 @@ export function useChat() {
     toggleSelect,
     selectAll,
     isSelected,
+
+    // regenerate
+    regenerateMessage,
   };
 }
 

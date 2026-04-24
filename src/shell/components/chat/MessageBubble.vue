@@ -75,6 +75,7 @@
         :text-content="textContent"
         :html-provider="htmlProvider"
         @enter-selection="$emit('enter-selection', message.id)"
+        @regenerate="$emit('regenerate', message.id)"
       />
     </div>
   </div>
@@ -105,6 +106,7 @@ const emit = defineEmits<{
   }];
   'toggle-select': [id: string];
   'enter-selection': [id: string];
+  'regenerate': [id: string];
 }>();
 
 // ── 内容解析 ─────────────────────────────────────────────

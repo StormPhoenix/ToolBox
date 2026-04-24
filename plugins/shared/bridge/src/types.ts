@@ -425,6 +425,20 @@ export interface ChatSendResult {
   userMessageId: string;
 }
 
+/** chat:regenerate 入参 */
+export interface ChatRegenerateInput {
+  sessionId: string;
+  /** 要重新生成的 assistant 消息 id */
+  assistantMessageId: string;
+}
+
+/** chat:regenerate 出参 */
+export interface ChatRegenerateResult {
+  requestId: string;
+  /** 被丢弃的消息数（含目标 assistant 自身） */
+  discardedCount: number;
+}
+
 /** chat:export-selected 入参 */
 export interface ChatExportInput {
   sessionId: string;
@@ -653,6 +667,13 @@ export interface ElectronAPI {
     mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
     fileName: string;
   }): Promise<ChatAttachmentInput | null>;
+
+  /**
+   * 重新生成指定 assistant 消息。
+   * 主进程会截断从该消息（含）到会话末尾的所有消息，然后基于截断后的上下文重新调用 LLM。
+   * 真实回复通过 chat:event 推送。
+   */
+  chatRegenerate(input: ChatRegenerateInput): Promise<ChatRegenerateResult>;
 
   /**
    * 把选中的多条消息合并导出为 Markdown 文件。

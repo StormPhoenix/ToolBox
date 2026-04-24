@@ -495,4 +495,87 @@ const x = 1;
 - 元信息开关（时间/模型头是否写入）
 - 更丰富的复制视觉反馈（除 icon 切换外加入 toast）
 
+---
+
+## 11. V1.2 — 重新生成 assistant 消息（已落地）
+
+### 11.1 功能
+
+assistant 气泡 hover 工具栏新增"⟲ 重新生成"按钮。点击后：
+
+1. 截断该条 assistant 消息（含）及会话末尾所有后续消息（严格丢弃）
+2. 基于截断后的上下文重新调用 LLM 流式生成
+3. 新 assistant 回复追加到会话末尾
+
+### 11.2 按钮矩阵
+
+| 按钮     | user 气泡 | assistant 气泡 |
+|----------|-----------|----------------|
+| 📋 复制  | ✓         | ✓              |
+| ⟲ 重新生成 | ✗       | ✓              |
+| ☑︎ 多选  | ✓         | ✓              |
+
+### 11.3 确认策略
+
+- 目标 assistant 是最后一条消息 → 直接执行，无 confirm
+- 目标之后还有消息 → `confirm("将丢弃后续 N 条消息并重新生成此回答，无法撤销。继续？")`
+- 不做撤销重新生成
+
+### 11.4 禁用条件
+
+| 条件 | 行为 |
+|---|---|
+| `isStreaming === true` | 按钮 disabled（tooltip "生成中，稍后再试"） |
+| 目标 assistant 是会话首条消息（idx === 0） | 主进程抛错，前端不做特殊校验（极端情况） |
+| 选择模式下 | 整个工具栏透明不可交互 |
+
+### 11.5 IPC
+
+```ts
+chatRegenerate(input: {
+  sessionId: string;
+  assistantMessageId: string;
+}): Promise<{
+  requestId: string;
+  discardedCount: number;
+}>;
+```
+
+主进程 `chat-engine.ts` 新增 `regenerateMessage()` 入口：
+1. 抢占同 session 旧请求
+2. `session.messages = session.messages.slice(0, idx)` 截断 + `saveSession`
+3. 复用 `runStream()` 启动流式生成
+4. 事件流复用 `chat:event`（与 `sendMessage` 完全一致）
+
+### 11.6 渲染进程流程
+
+`useChat.regenerateMessage(assistantMessageId)`:
+1. 前置：`!isStreaming` + `activeSession` 存在
+2. 查找 idx；若 `tailCount > 0` 且用户取消 confirm → 返回
+3. 乐观截断前端消息数组（UX 即时）
+4. 调用 `chatRegenerate` IPC → 拿到 `requestId`
+5. `currentRequestId = requestId` → 后续由 `handleChatEvent` 处理 stream-chunk / stream-end
+
+### 11.7 边界场景
+
+| 场景 | 处理 |
+|---|---|
+| 正在重新生成时用户发新消息（Composer） | 走现有"抢占同 session 旧请求"逻辑 |
+| 重新生成返回 error / aborted | 复用现有事件流处理；截断不回滚（用户语义是"重来"） |
+| 丢弃的消息含图片 image_ref | 不主动清理，依赖启动时 `cleanOrphanImages()` |
+| 模型已切换 | 使用当前配置的 provider/model（功能特性，非 bug） |
+
+### 11.8 改动清单
+
+| 文件 | 改动 |
+|---|---|
+| `src/main/chat/chat-engine.ts` | 新增 `regenerateMessage()` |
+| `src/main/chat/chat-ipc.ts` | 注册 `chat:regenerate` |
+| `src/main/preload.ts` | 暴露 `chatRegenerate` |
+| `plugins/shared/bridge/src/types.ts` / `index.ts` | `ChatRegenerateInput` / `ChatRegenerateResult` + API 签名 |
+| `src/shell/composables/useChat.ts` | `regenerateMessage()` + confirm |
+| `src/shell/components/chat/BubbleToolbar.vue` | assistant 多一个 ⟲ 按钮；inject `useChat` 的 `isStreaming` 控制禁用 |
+| `src/shell/components/chat/MessageBubble.vue` | 透传 `regenerate` 事件 |
+| `src/shell/components/chat/MessageList.vue` | 透传 `regenerate` 事件 |
+| `src/shell/components/chat/ChatView.vue` | 监听 `@regenerate` → `useChat.regenerateMessage` |
 

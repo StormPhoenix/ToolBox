@@ -24,6 +24,7 @@
         @resend-image="(r) => $emit('resend-image', r)"
         @toggle-select="(id) => $emit('toggle-select', id)"
         @enter-selection="(id) => $emit('enter-selection', id)"
+        @regenerate="(id) => $emit('regenerate', id)"
       />
 
       <!-- 流式气泡：选择态下不展示，避免用户误以为能选 -->
@@ -99,6 +100,7 @@ defineEmits<{
   }];
   'toggle-select': [id: string];
   'enter-selection': [id: string];
+  'regenerate': [id: string];
 }>();
 
 // 默认未提供 isSelected 时返回 false

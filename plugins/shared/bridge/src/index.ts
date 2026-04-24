@@ -53,6 +53,8 @@ export type {
   ChatAttachmentInput,
   ChatSendInput,
   ChatSendResult,
+  ChatRegenerateInput,
+  ChatRegenerateResult,
   ChatExportInput,
   ChatExportResult,
   ChatEvent,

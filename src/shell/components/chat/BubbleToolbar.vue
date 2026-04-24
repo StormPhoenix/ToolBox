@@ -1,5 +1,6 @@
 <template>
   <div class="bubble-toolbar" :class="[`role-${role}`]">
+    <!-- 复制（user + assistant 共有） -->
     <button
       class="bubble-toolbar-btn"
       type="button"
@@ -9,7 +10,6 @@
     >
       <span v-if="copied" class="icon icon-check">✓</span>
       <span v-else class="icon" aria-hidden="true">
-        <!-- 复制图标（双矩形） -->
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4">
           <rect x="4" y="4" width="9" height="10" rx="1.6" />
           <path d="M3 11V3a1 1 0 0 1 1-1h7" />
@@ -17,15 +17,39 @@
       </span>
     </button>
 
+    <!-- 重新生成（仅 assistant） -->
+    <button
+      v-if="role === 'assistant'"
+      class="bubble-toolbar-btn"
+      :class="{ disabled: regenerateDisabled }"
+      type="button"
+      :title="regenerateDisabled ? '生成中，稍后再试' : '重新生成'"
+      :aria-label="regenerateDisabled ? '生成中，稍后再试' : '重新生成'"
+      :disabled="regenerateDisabled"
+      @click.stop="onRegenerate"
+    >
+      <span class="icon" aria-hidden="true">
+        <!-- 循环箭头（两段弧 + 箭头） -->
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4">
+          <path d="M13.5 8a5.5 5.5 0 0 1-9.8 3.4" />
+          <path d="M2.5 8a5.5 5.5 0 0 1 9.8-3.4" />
+          <polyline points="12.3 2 12.3 4.6 9.7 4.6" />
+          <polyline points="3.7 14 3.7 11.4 6.3 11.4" />
+        </svg>
+      </span>
+    </button>
+
+    <!-- 多选（user + assistant 共有） -->
     <button
       class="bubble-toolbar-btn"
+      :class="{ disabled: enterSelectionDisabled }"
       type="button"
       title="多选"
       aria-label="多选"
+      :disabled="enterSelectionDisabled"
       @click.stop="$emit('enter-selection')"
     >
       <span class="icon" aria-hidden="true">
-        <!-- Checklist 图标 -->
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4">
           <path d="M3 4.2l1.3 1.3L7 2.8" />
           <path d="M3 10.2l1.3 1.3L7 8.8" />
@@ -41,36 +65,40 @@
 /**
  * BubbleToolbar — 消息气泡下方的 hover 工具栏
  *
- * 视觉规范（V1.2 调整，融入背景）：
- *  - 无背景 / 无边框 / 无阴影，纯线条图标直接贴在消息列表背景上
- *  - 默认 opacity 0 且 pointer-events: none，保留高度占位（不抖动）
- *  - 外层 .bubble-row:hover 时显现（hover 触发由父组件控制，非本组件）
- *  - icon 仅通过颜色变化反馈 hover（无圆形/方形 hover 底）
+ * 按钮矩阵（按 role 差异化）：
  *
- * 内含两个按钮：
- *  - 复制：把该条消息内容写入剪贴板（text/plain + text/html 双份）；
- *    成功后图标切换为 ✓（绿色）持续 1s 后复原
- *  - 多选：通知上层进入选择模式并预选中这一条
+ * | 按钮     | user | assistant |
+ * |----------|------|-----------|
+ * | 复制     | ✓    | ✓         |
+ * | 重新生成 | ✗    | ✓         |
+ * | 多选     | ✓    | ✓         |
+ *
+ * 禁用规则：
+ *  - 重新生成：isStreaming === true 时禁用
+ *  - 多选：isStreaming === true 时禁用
+ *  - 复制：始终可用
  */
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import type { ChatMessage } from '@toolbox/bridge';
+import { useChat } from '../../composables/useChat';
 
 const props = defineProps<{
   message: ChatMessage;
   role: ChatMessage['role'];
-  /**
-   * 可选：已经渲染好的 HTML（用于 text/html 剪贴板格式）。
-   * 不传则仅写入 text/plain。
-   */
   htmlProvider?: () => string | null;
-  /** 纯文本表示（由父级抽取，避免重复解析 content 的 text 块） */
   textContent: string;
 }>();
 
 const emit = defineEmits<{
   'enter-selection': [];
+  regenerate: [];
   copied: [];
 }>();
+
+const { isStreaming } = useChat();
+
+const regenerateDisabled = computed(() => isStreaming.value);
+const enterSelectionDisabled = computed(() => isStreaming.value);
 
 const copied = ref(false);
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -82,11 +110,6 @@ function escapeHtml(s: string): string {
     .replace(/>/g, '&gt;');
 }
 
-/**
- * 收集消息中的图片 markdown 占位（附在文本末尾）。
- * image_ref → ![name](toolbox-img://hash.ext)
- * image(base64) → ![图片](pasted)
- */
 function collectImagePlaceholders(msg: ChatMessage): string[] {
   if (typeof msg.content === 'string') return [];
   const out: string[] = [];
@@ -114,13 +137,16 @@ function collectImagePlaceholders(msg: ChatMessage): string[] {
   return out;
 }
 
+function onRegenerate(): void {
+  if (regenerateDisabled.value) return;
+  emit('regenerate');
+}
+
 async function onCopy(): Promise<void> {
   const imgLines = collectImagePlaceholders(props.message);
   const textParts = [props.textContent, ...imgLines].filter((s) => s && s.length);
   const plainText = textParts.join('\n\n') || '（空消息）';
 
-  // text/html 分支：优先用 htmlProvider 提供的 assistant 渲染 HTML；
-  // user 气泡无渲染 HTML，退化为 <p>…</p> 包裹 + 图片占位
   const htmlChunks: string[] = [];
   const rawHtml = props.htmlProvider?.() ?? null;
   if (rawHtml && rawHtml.trim()) {
@@ -170,10 +196,6 @@ async function onCopy(): Promise<void> {
 </script>
 
 <style scoped>
-/**
- * 工具栏行：普通 flow 元素，始终占位 24px 高度 + 4px 上边距。
- * 默认透明且不可交互；由父级 .bubble-row:hover 控制显现。
- */
 .bubble-toolbar {
   display: flex;
   align-items: center;
@@ -186,7 +208,6 @@ async function onCopy(): Promise<void> {
   transition: opacity 0.12s ease-out;
 }
 
-/* user 气泡右对齐 → 工具栏右对齐；assistant 气泡左对齐 → 工具栏左对齐 */
 .role-user {
   justify-content: flex-end;
 }
@@ -201,15 +222,20 @@ async function onCopy(): Promise<void> {
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  border-radius: 0; /* 不加 hover 底，不需要圆角 */
+  border-radius: 0;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: color 0.1s linear;
 }
-.bubble-toolbar-btn:hover {
+.bubble-toolbar-btn:hover:not(:disabled) {
   color: var(--text-primary);
+}
+.bubble-toolbar-btn.disabled,
+.bubble-toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .icon {

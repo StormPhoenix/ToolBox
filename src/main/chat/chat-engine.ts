@@ -365,6 +365,64 @@ export async function sendMessage(params: {
   return { requestId, userMessage };
 }
 
+// ─── 重新生成 ──────────────────────────────────────────────
+
+/**
+ * 重新生成某条 assistant 消息：截断从 M（含）到会话末尾的所有消息，
+ * 基于截断后的上下文重新调用 LLM 流式生成。
+ *
+ * 行为与 sendMessage 后半段一致，复用 runStream。
+ *
+ * @returns requestId + 被丢弃的消息数
+ */
+export async function regenerateMessage(params: {
+  sessionId: string;
+  assistantMessageId: string;
+  onEvent: ChatEventEmitter;
+}): Promise<{ requestId: string; discardedCount: number }> {
+  const { sessionId, assistantMessageId, onEvent } = params;
+
+  // 抢占同会话旧请求
+  const existing = activeRequests.get(sessionId);
+  if (existing) {
+    log.info(`regenerate 抢占旧请求: sessionId=${sessionId}, oldRequestId=${existing.requestId}`);
+    existing.abort.abort();
+    activeRequests.delete(sessionId);
+  }
+
+  const session = await store.loadSession(sessionId);
+  if (!session) throw new Error(`会话不存在: ${sessionId}`);
+
+  const idx = session.messages.findIndex((m) => m.id === assistantMessageId);
+  if (idx < 0) throw new Error(`消息不存在: ${assistantMessageId}`);
+  if (idx === 0) throw new Error('不能重新生成会话的第一条消息');
+
+  const discardedCount = session.messages.length - idx;
+  // 截断：只保留 idx 之前的消息
+  session.messages = session.messages.slice(0, idx);
+  await store.saveSession(session);
+
+  log.info(
+    `regenerate 截断: sessionId=${sessionId}, targetId=${assistantMessageId}, ` +
+      `discarded=${discardedCount}, remaining=${session.messages.length}`
+  );
+
+  const requestId = randomUUID();
+  const abort = new AbortController();
+  activeRequests.set(sessionId, { requestId, sessionId, abort });
+
+  void runStream({
+    requestId,
+    sessionId,
+    history: session.messages,
+    systemPrompt: session.systemPrompt,
+    abort,
+    onEvent,
+  });
+
+  return { requestId, discardedCount };
+}
+
 async function runStream(params: {
   requestId: string;
   sessionId: string;

@@ -105,6 +105,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chatResendImageRef: (ref: unknown) =>
     ipcRenderer.invoke('chat:resend-image-ref', ref),
 
+  chatRegenerate: (input: unknown) =>
+    ipcRenderer.invoke('chat:regenerate', input),
+
   chatExportSelected: (input: unknown) =>
     ipcRenderer.invoke('chat:export-selected', input),
 

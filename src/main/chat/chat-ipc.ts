@@ -149,6 +149,28 @@ export function registerChatHandlers(): void {
     }
   );
 
+  // ── chat:regenerate ──────────────────────────────────────
+  // 重新生成指定 assistant 消息：截断该消息及之后的所有内容，重新调用 LLM
+  ipcMain.handle(
+    'chat:regenerate',
+    async (
+      _e,
+      input: { sessionId: string; assistantMessageId: string }
+    ): Promise<{ requestId: string; discardedCount: number }> => {
+      if (!input?.sessionId) throw new Error('缺少 sessionId');
+      if (!input?.assistantMessageId) throw new Error('缺少 assistantMessageId');
+
+      log.info(
+        `chat:regenerate sessionId=${input.sessionId}, targetId=${input.assistantMessageId}`
+      );
+      return engine.regenerateMessage({
+        sessionId: input.sessionId,
+        assistantMessageId: input.assistantMessageId,
+        onEvent: broadcastEvent,
+      });
+    }
+  );
+
   // ── chat:export-selected ────────────────────────────────
   // 把选中的消息合并写成 Markdown（+ 同级 images/ 子目录）
   ipcMain.handle(

@@ -62,6 +62,7 @@
           @open-lightbox="onOpenLightbox"
           @toggle-select="onToggleSelect"
           @enter-selection="onEnterSelection"
+          @regenerate="onRegenerate"
         />
         <!--
           Composer 在选择态下隐藏（v-show 而非 v-if，保活草稿与附件状态）
@@ -169,6 +170,7 @@ const {
   toggleSelect,
   selectAll,
   isSelected,
+  regenerateMessage,
 } = useChat();
 
 // ── LLM 配置状态 ─────────────────────────────────────────
@@ -349,6 +351,10 @@ const totalSelectable = computed(
 function onEnterSelection(messageId: string): void {
   if (isStreaming.value) return;
   enterSelection(messageId);
+}
+
+function onRegenerate(messageId: string): void {
+  void regenerateMessage(messageId);
 }
 
 function onToggleSelect(id: string): void {
