@@ -5,7 +5,7 @@
     :class="{ 'selection-mode': selectionMode }"
     @scroll="onScroll"
   >
-    <div class="message-list-inner">
+    <div ref="innerRef" class="message-list-inner">
       <div v-if="messages.length === 0 && !streamingText" class="empty-placeholder">
         <div class="placeholder-icon">💬</div>
         <div class="placeholder-text">开始对话吧</div>
@@ -54,18 +54,30 @@
 /**
  * 消息列表
  *
- * 自动滚底策略：
- * - 默认：messages/streamingText 变化时滚到底
- * - 用户手动向上滚超过 120px → 暂停自动滚底，显示"↓ 新消息"按钮
+ * 滚动策略：
+ * - 初始定位（切换/打开会话时）：瞬跳到底部，视觉上不经过"从顶滚到底"
+ *   · 触发源为 props.sessionId 变化（含 immediate）
+ *   · 使用 behavior: 'auto' 强制瞬跳
+ * - 运行时自动跟随：messages / streamingText / isStreaming 变化时滚到底
+ * - 容器高度变化兜底（ResizeObserver）：
+ *   · 图片解码、Markdown/代码块异步撑高后内容高度增加时，
+ *     若当前 autoScroll=true，自动再瞬跳一次保持贴底
+ * - 用户手动向上滚超过阈值 → 暂停自动滚底，显示"↓ 新消息"按钮
  * - 点击按钮或手动回到底部 → 恢复自动滚底
  */
-import { ref, nextTick, watch } from 'vue';
+import { ref, nextTick, watch, onMounted, onBeforeUnmount } from 'vue';
 import type { ChatMessage } from '@toolbox/bridge';
 import MessageBubble from './MessageBubble.vue';
 import StreamingBubble from './StreamingBubble.vue';
 import type { LightboxItem } from './ImageLightbox.vue';
 
 const props = defineProps<{
+  /**
+   * 当前会话 id。用作"初始定位"的触发源，
+   * 比 watch messages 引用更稳定（流式结束时 activeSession 会被整个替换，
+   * 但 sessionId 不变，因此不会误触发初始瞬跳）。
+   */
+  sessionId: string | null;
   messages: ChatMessage[];
   streamingText: string;
   isStreaming: boolean;
@@ -95,6 +107,7 @@ const isSelected = (id: string): boolean => {
 };
 
 const scrollRef = ref<HTMLElement | null>(null);
+const innerRef = ref<HTMLElement | null>(null);
 const autoScroll = ref(true);
 const showJumpToBottom = ref(false);
 
@@ -106,6 +119,14 @@ function isAtBottom(): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD;
 }
 
+/**
+ * 跳到底部。
+ *
+ * 始终使用 `behavior: 'auto'` 瞬跳：
+ * - 打开会话时避免"从顶部滑到底部"的视觉；
+ * - 流式 chunk 高频到达时 smooth 会追不上，反而观感更差；
+ * - "↓ 新消息"按钮跳转通常距离较远，瞬跳更利落。
+ */
 function scrollToBottom(force = false): void {
   const el = scrollRef.value;
   if (!el) return;
@@ -131,7 +152,22 @@ function onScroll(): void {
   }
 }
 
-// 监听内容变化，合批滚动
+// ── 初始定位：会话切换/首次挂载时瞬跳到底 ──────────────────
+// 触发源为 sessionId（而非 messages 引用），以避免流式结束时
+// activeSession 被替换引发的误触发。
+watch(
+  () => props.sessionId,
+  (id) => {
+    if (!id) return;
+    // 等 Vue 完成 DOM patch，再等浏览器 layout 一帧，确保 scrollHeight 可读
+    void nextTick(() => {
+      requestAnimationFrame(() => scrollToBottom(true));
+    });
+  },
+  { immediate: true, flush: 'post' }
+);
+
+// 运行时自动跟随：内容/流式状态变化时合批滚动
 watch(
   () => [props.messages.length, props.streamingText, props.isStreaming],
   () => {
@@ -139,6 +175,37 @@ watch(
   },
   { flush: 'post' }
 );
+
+// ── ResizeObserver 兜底 ────────────────────────────────────
+// 图片解码、代码高亮、Markdown 异步资源等会在首次 paint 之后
+// 继续撑高容器。只要当前仍处于"贴底"意图（autoScroll=true），
+// 就再瞬跳一次保证视觉底部不漂移。
+let resizeObserver: ResizeObserver | null = null;
+let lastInnerHeight = 0;
+
+onMounted(() => {
+  if (!innerRef.value || typeof ResizeObserver === 'undefined') return;
+  resizeObserver = new ResizeObserver((entries) => {
+    const entry = entries[0];
+    if (!entry) return;
+    const h = entry.contentRect.height;
+    // 仅在内容"增高"且用户仍有贴底意图时兜底
+    if (h > lastInnerHeight && autoScroll.value) {
+      // 直接赋值 scrollTop，避免在 observer 回调里触发 smooth 动画（已无 smooth，此处仍保守使用瞬跳）
+      const el = scrollRef.value;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+    lastInnerHeight = h;
+  });
+  resizeObserver.observe(innerRef.value);
+});
+
+onBeforeUnmount(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+});
 
 defineExpose({ scrollToBottom });
 </script>
@@ -149,7 +216,12 @@ defineExpose({ scrollToBottom });
   overflow-y: auto;
   padding: 18px 24px;
   position: relative;
-  scroll-behavior: smooth;
+  /*
+   * 注：不设置 scroll-behavior: smooth。
+   * - 打开会话的初始定位必须瞬跳，否则会出现"从顶滑到底"的视觉；
+   * - 流式 chunk 高频到达时 smooth 追不上；
+   * - "↓ 新消息"按钮跳转通常距离较远，瞬跳更利落。
+   */
 }
 
 .message-list-inner {

@@ -50,6 +50,7 @@
       <!-- 正常对话区 -->
       <template v-else>
         <MessageList
+          :session-id="activeSession.id"
           :messages="messages"
           :streaming-text="streamingText"
           :is-streaming="isStreaming"
