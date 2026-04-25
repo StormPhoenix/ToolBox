@@ -5,6 +5,33 @@
     </div>
 
     <div class="settings-body">
+      <!-- 外观区块 -->
+      <section class="settings-section">
+        <div class="section-header">
+          <span class="section-icon">🎨</span>
+          <div>
+            <h2 class="section-title">外观</h2>
+            <p class="section-desc">选择应用的显示主题。"跟随系统"会自动适配 macOS 的深色/浅色模式。</p>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">主题</label>
+          <div class="theme-segmented">
+            <button
+              v-for="opt in THEME_OPTIONS"
+              :key="opt.value"
+              class="theme-seg-btn"
+              :class="{ active: preference === opt.value }"
+              @click="setPreference(opt.value)"
+            >
+              <span class="theme-seg-icon">{{ opt.icon }}</span>
+              {{ opt.label }}
+            </button>
+          </div>
+        </div>
+      </section>
+
       <!-- LLM 配置区块 -->
       <section class="settings-section">
         <div class="section-header">
@@ -312,6 +339,7 @@ import type {
   TrustedToolItem,
   DebugConfigData,
 } from '@toolbox/bridge';
+import { useTheme, type ThemePreference } from '../composables/useTheme';
 
 interface ProviderFormItem {
   apiKey: string;
@@ -350,6 +378,16 @@ const PLACEHOLDERS: Record<LLMProviderType, { key: string; model: string; baseUR
     baseURL: '',
   },
 };
+
+// ── 主题 ──────────────────────────────────────────────────
+
+const THEME_OPTIONS: Array<{ value: ThemePreference; label: string; icon: string }> = [
+  { value: 'dark',   label: '深色',    icon: '🌙' },
+  { value: 'light',  label: '浅色',    icon: '☀️' },
+  { value: 'system', label: '跟随系统', icon: '💻' },
+];
+
+const { preference, setPreference } = useTheme();
 
 // ── 状态 ──────────────────────────────────────────────────
 
@@ -1219,5 +1257,47 @@ function showDebugToast(msg: string): void {
   font-size: 0.75rem;
   color: var(--text-dim);
   font-family: 'Menlo', 'Consolas', monospace;
+}
+
+/* ── 主题分段控件 ── */
+.theme-segmented {
+  display: inline-flex;
+  gap: 0;
+  background: var(--bg-content);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 3px;
+}
+
+.theme-seg-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 18px;
+  border-radius: calc(var(--radius-md) - 3px);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+}
+
+.theme-seg-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.theme-seg-btn.active {
+  background: var(--bg-active);
+  color: var(--accent-light);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.theme-seg-icon {
+  font-size: 1rem;
+  line-height: 1;
 }
 </style>
