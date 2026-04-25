@@ -31,11 +31,12 @@
         @submit-edit="(p) => $emit('submit-edit', p)"
       />
 
-      <!-- 工具调用气泡：搜索中 / 搜索完成 -->
+      <!-- 工具调用气泡：narration / 搜索中 / 搜索完成 -->
       <ToolCallBubble
-        v-if="isStreaming && !selectionMode && (toolExecuting || (toolResults && toolResults.length > 0))"
+        v-if="isStreaming && !selectionMode && (toolExecuting || (toolResults && toolResults.length > 0) || (narrations && narrations.length > 0))"
         :executing="toolExecuting ?? null"
         :results="toolResults ?? []"
+        :narrations="narrations ?? []"
       />
 
       <!-- 流式气泡：选择态下不展示，避免用户误以为能选 -->
@@ -106,6 +107,11 @@ const props = defineProps<{
     success: boolean;
     summary: string;
   }>;
+  /**
+   * 当前请求周期内累积的 assistant 中间叙述文本（每轮 tool_use 前的 narration）。
+   * 仅流式过程中可见，stream-end / error / aborted 时清空。
+   */
+  narrations?: string[];
 }>();
 
 defineEmits<{

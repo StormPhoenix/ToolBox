@@ -46,6 +46,7 @@ export type {
   ResizeResponse,
   SaveResizedResult,
   // Chat 类型
+  ChatMode,
   ChatMessageContent,
   ChatMessage,
   ChatSession,

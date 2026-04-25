@@ -60,6 +60,7 @@
           :editing-message-id="editingMessageId"
           :tool-executing="toolExecuting"
           :tool-results="toolResults"
+          :narrations="narrationsThisRequest"
           @dismiss-error="dismissError"
           @resend-image="onResendImage"
           @open-lightbox="onOpenLightbox"
@@ -79,8 +80,10 @@
           ref="composerRef"
           :is-streaming="isStreaming"
           :disabled="!llmAvailable"
+          :current-mode="sessionMode"
           @submit="onSubmit"
           @abort="abort"
+          @mode-change="setSessionMode"
         />
         <SelectionToolbar
           v-if="selectionMode"
@@ -168,6 +171,7 @@ const {
   // tool call state
   toolExecuting,
   toolResults,
+  narrationsThisRequest,
   pendingConfirm,
   // selection
   selectionMode,
@@ -193,6 +197,9 @@ const {
   enterEditing,
   exitEditing,
   submitEdit,
+  // mode
+  sessionMode,
+  setSessionMode,
 } = useChat();
 
 // ── LLM 配置状态 ─────────────────────────────────────────

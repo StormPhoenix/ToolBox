@@ -330,6 +330,17 @@ export interface SaveResizedResult {
   error?: string;
 }
 
+// ── Chat 对话模式 ─────────────────────────────────────────────────────────
+
+/**
+ * 对话模式（per-request 参数，同时作为 session 级别的持久化默认值）。
+ *
+ * - chat：纯对话，不启用工具，历史 toolRoundtrip 全部剔除
+ * - agent：智能体，启用工具，历史 toolRoundtrip 全部剔除（节省 token）
+ * - deep：深度模式，启用工具，历史 toolRoundtrip 全部保留（原始工具输入/输出）
+ */
+export type ChatMode = 'chat' | 'agent' | 'deep';
+
 // ── Chat 类型（Shell 内置对话功能） ───────────────────────────────────────
 
 /**
@@ -403,6 +414,11 @@ export interface ChatSession {
   updatedAt: number;
   systemPrompt?: string;
   messages: ChatMessage[];
+  /**
+   * 会话当前对话模式（per-request mode 的持久化默认值）。
+   * 新建会话默认 'chat'；旧会话无此字段时 UI 视为 'chat'。
+   */
+  mode?: ChatMode;
 }
 
 /** 会话列表项（轻量索引） */
@@ -426,6 +442,8 @@ export interface ChatSendInput {
   sessionId: string;
   userText: string;
   attachments?: ChatAttachmentInput[];
+  /** 本次请求使用的对话模式，不传时默认 'agent' */
+  mode?: ChatMode;
 }
 
 /** chat:send 出参 */
@@ -439,6 +457,8 @@ export interface ChatRegenerateInput {
   sessionId: string;
   /** 要重新生成的 assistant 消息 id */
   assistantMessageId: string;
+  /** 本次重新生成使用的对话模式，不传时默认 'agent' */
+  mode?: ChatMode;
 }
 
 /** chat:regenerate 出参 */
@@ -457,6 +477,8 @@ export interface ChatEditAndResendInput {
   newText: string;
   /** 原消息中的图片引用，原样保留（不走压缩管线） */
   imageRefs?: LLMImageRefBlock[];
+  /** 本次重发使用的对话模式，不传时默认 'agent' */
+  mode?: ChatMode;
 }
 
 /** chat:edit-and-resend 出参 */
@@ -696,6 +718,12 @@ export interface ElectronAPI {
 
   /** 清空会话消息（保留会话本身） */
   chatClearContext(id: string): Promise<void>;
+
+  /**
+   * 更新会话对话模式并立即持久化。
+   * UI 切换模式时调用，下次打开会话时恢复为此模式。
+   */
+  chatSetSessionMode(sessionId: string, mode: ChatMode): Promise<void>;
 
   /**
    * 发送用户消息，异步流式回复。

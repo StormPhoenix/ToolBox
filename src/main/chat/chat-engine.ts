@@ -31,6 +31,7 @@ import type {
   ChatAttachmentInput,
   ChatEvent,
   ChatMessage,
+  ChatMode,
   PersistedContentBlock,
   PersistedToolResultBlock,
 } from './types';
@@ -267,16 +268,19 @@ async function buildUserMessage(
  *  - text / image 块原样保留
  *  - image_ref 块：最近 K 条含图消息还原 base64；更早的替换为占位文本
  *  - 纯字符串 content 原样返回
+ *  - toolRoundtrip 消息：deep 模式保留；chat / agent 模式全部跳过
  *
  * 返回值可直接送入 Provider.streamMessage。
  */
 async function prepareLLMMessages(
-  history: ChatMessage[]
+  history: ChatMessage[],
+  mode: ChatMode
 ): Promise<LLMMessageParam[]> {
   // 第一轮：定位"最近 K 条含图消息"的索引集合
   const imageMsgIndices: number[] = [];
   for (let i = history.length - 1; i >= 0; i--) {
     const m = history[i];
+    if (m.toolRoundtrip && mode !== 'deep') continue; // 跳过后不计入图片索引
     if (typeof m.content === 'string') continue;
     if (m.content.some(isImageRef)) {
       imageMsgIndices.push(i);
@@ -289,6 +293,10 @@ async function prepareLLMMessages(
   const result: LLMMessageParam[] = [];
   for (let i = 0; i < history.length; i++) {
     const m = history[i];
+
+    // chat / agent 模式：跳过所有 toolRoundtrip 中间消息
+    // deep 模式：保留全部（原始 tool_use / tool_result 块一并送入 LLM）
+    if (m.toolRoundtrip && mode !== 'deep') continue;
     if (typeof m.content === 'string') {
       result.push({ role: m.role, content: m.content });
       continue;
@@ -435,10 +443,10 @@ export async function sendMessage(params: {
   userText: string;
   attachments?: ChatAttachmentInput[];
   onEvent: ChatEventEmitter;
-  /** 是否启用工具调用（联网搜索等） */
-  enableTools?: boolean;
+  /** 对话模式，决定 tools 是否启用及 toolRoundtrip 历史的处理方式 */
+  mode?: ChatMode;
 }): Promise<{ requestId: string; userMessage: ChatMessage }> {
-  const { sessionId, userText, attachments, onEvent, enableTools } = params;
+  const { sessionId, userText, attachments, onEvent, mode } = params;
 
   // 抢占同会话旧请求
   const existing = activeRequests.get(sessionId);
@@ -467,7 +475,7 @@ export async function sendMessage(params: {
     systemPrompt: session.systemPrompt,
     abort,
     onEvent,
-    enableTools: enableTools ?? false,
+    mode: mode ?? 'agent',
   });
 
   return { requestId, userMessage };
@@ -485,9 +493,9 @@ export async function regenerateMessage(params: {
   sessionId: string;
   assistantMessageId: string;
   onEvent: ChatEventEmitter;
-  enableTools?: boolean;
+  mode?: ChatMode;
 }): Promise<{ requestId: string; discardedCount: number }> {
-  const { sessionId, assistantMessageId, onEvent, enableTools } = params;
+  const { sessionId, assistantMessageId, onEvent, mode } = params;
 
   // 抢占同会话旧请求
   const existing = activeRequests.get(sessionId);
@@ -530,7 +538,7 @@ export async function regenerateMessage(params: {
     systemPrompt: session.systemPrompt,
     abort,
     onEvent,
-    enableTools: enableTools ?? false,
+    mode: mode ?? 'agent',
   });
 
   return { requestId, discardedCount };
@@ -552,9 +560,9 @@ export async function editAndResend(params: {
   newText: string;
   imageRefs?: LLMImageRefBlock[];
   onEvent: ChatEventEmitter;
-  enableTools?: boolean;
+  mode?: ChatMode;
 }): Promise<{ requestId: string; userMessageId: string; discardedCount: number }> {
-  const { sessionId, targetMessageId, newText, imageRefs, onEvent, enableTools } = params;
+  const { sessionId, targetMessageId, newText, imageRefs, onEvent, mode } = params;
 
   // 抢占同会话旧请求
   const existing = activeRequests.get(sessionId);
@@ -619,7 +627,7 @@ export async function editAndResend(params: {
     systemPrompt: session.systemPrompt,
     abort,
     onEvent,
-    enableTools: enableTools ?? false,
+    mode: mode ?? 'agent',
   });
 
   return { requestId, userMessageId: userMessage.id, discardedCount };
@@ -632,9 +640,11 @@ async function runStream(params: {
   systemPrompt?: string;
   abort: AbortController;
   onEvent: ChatEventEmitter;
-  enableTools: boolean;
+  mode: ChatMode;
 }): Promise<void> {
-  const { requestId, sessionId, history, systemPrompt, abort, onEvent, enableTools } = params;
+  const { requestId, sessionId, history, systemPrompt, abort, onEvent, mode } = params;
+  // chat 模式不启用工具；agent / deep 均启用
+  const enableTools = mode !== 'chat';
   const runStartMs = Date.now();
 
   const router = await getSharedLLMRouter();
@@ -653,7 +663,7 @@ async function runStream(params: {
 
   let llmMessages: LLMMessageParam[];
   try {
-    llmMessages = await prepareLLMMessages(history);
+    llmMessages = await prepareLLMMessages(history, mode);
   } catch (err) {
     onEvent({
       kind: 'error',

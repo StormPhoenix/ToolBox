@@ -19,6 +19,7 @@ import { ipcMain, webContents } from 'electron';
 import type {
   ChatAttachmentInput,
   ChatEvent,
+  ChatMode,
   ChatSendInput,
   ChatSendResult,
   ChatSession,
@@ -115,7 +116,7 @@ export function registerChatHandlers(): void {
         userText: input.userText,
         attachments: input.attachments as ChatAttachmentInput[] | undefined,
         onEvent: broadcastEvent,
-        enableTools: true,
+        mode: (input.mode as ChatMode | undefined) ?? 'agent',
       });
 
       return { requestId, userMessageId: userMessage.id };
@@ -166,25 +167,38 @@ export function registerChatHandlers(): void {
     }
   );
 
+  // ── chat:set-session-mode ───────────────────────────────
+  // UI 切换模式时立即持久化（per-request mode 的 session 级默认值）
+  ipcMain.handle(
+    'chat:set-session-mode',
+    async (_e, sessionId: string, mode: ChatMode): Promise<void> => {
+      if (!sessionId) throw new Error('缺少 sessionId');
+      if (mode !== 'chat' && mode !== 'agent' && mode !== 'deep') {
+        throw new Error(`非法 mode 值: ${String(mode)}`);
+      }
+      await store.setSessionMode(sessionId, mode);
+    }
+  );
+
   // ── chat:regenerate ──────────────────────────────────────
   // 重新生成指定 assistant 消息：截断该消息及之后的所有内容，重新调用 LLM
   ipcMain.handle(
     'chat:regenerate',
     async (
       _e,
-      input: { sessionId: string; assistantMessageId: string }
+      input: { sessionId: string; assistantMessageId: string; mode?: ChatMode }
     ): Promise<{ requestId: string; discardedCount: number }> => {
       if (!input?.sessionId) throw new Error('缺少 sessionId');
       if (!input?.assistantMessageId) throw new Error('缺少 assistantMessageId');
 
       log.info(
-        `chat:regenerate sessionId=${input.sessionId}, targetId=${input.assistantMessageId}`
+        `chat:regenerate sessionId=${input.sessionId}, targetId=${input.assistantMessageId}, mode=${input.mode ?? 'agent'}`
       );
       return engine.regenerateMessage({
         sessionId: input.sessionId,
         assistantMessageId: input.assistantMessageId,
         onEvent: broadcastEvent,
-        enableTools: true,
+        mode: input.mode ?? 'agent',
       });
     }
   );
@@ -200,6 +214,7 @@ export function registerChatHandlers(): void {
         targetMessageId: string;
         newText: string;
         imageRefs?: unknown[];
+        mode?: ChatMode;
       }
     ): Promise<{ requestId: string; userMessageId: string; discardedCount: number }> => {
       if (!input?.sessionId) throw new Error('缺少 sessionId');
@@ -210,7 +225,7 @@ export function registerChatHandlers(): void {
 
       log.info(
         `chat:edit-and-resend sessionId=${input.sessionId}, targetId=${input.targetMessageId}, ` +
-          `text=${input.newText?.length ?? 0} chars, images=${input.imageRefs?.length ?? 0}`
+          `text=${input.newText?.length ?? 0} chars, images=${input.imageRefs?.length ?? 0}, mode=${input.mode ?? 'agent'}`
       );
       return engine.editAndResend({
         sessionId: input.sessionId,
@@ -218,7 +233,7 @@ export function registerChatHandlers(): void {
         newText: input.newText,
         imageRefs: input.imageRefs as LLMImageRefBlock[] | undefined,
         onEvent: broadcastEvent,
-        enableTools: true,
+        mode: input.mode ?? 'agent',
       });
     }
   );

@@ -26,16 +26,6 @@
     </div>
 
     <div class="composer-body">
-      <button
-        class="icon-btn"
-        type="button"
-        title="添加图片"
-        :disabled="disabled || isStreaming"
-        @click="pickImage"
-      >
-        📎
-      </button>
-
       <textarea
         ref="textareaRef"
         v-model="text"
@@ -48,25 +38,56 @@
         @input="autoResize"
       />
 
-      <button
-        v-if="isStreaming"
-        class="action-btn action-stop"
-        type="button"
-        title="停止生成"
-        @click="$emit('abort')"
-      >
-        ⏹
-      </button>
-      <button
-        v-else
-        class="action-btn action-send"
-        type="button"
-        :disabled="disabled || !canSend"
-        title="发送 (Enter)"
-        @click="submit"
-      >
-        ▶
-      </button>
+      <!-- 底部工具栏：左侧附件 + 模式按钮，右侧发送/停止 -->
+      <div class="composer-toolbar">
+        <div class="toolbar-left">
+          <div class="mode-switcher">
+            <button
+              v-for="m in MODES"
+              :key="m.value"
+              class="mode-btn"
+              :class="{ active: currentMode === m.value }"
+              :title="m.title"
+              :disabled="isStreaming"
+              type="button"
+              @click="emit('mode-change', m.value)"
+            >
+              {{ m.label }}
+            </button>
+          </div>
+        </div>
+
+        <div class="toolbar-right">
+          <button
+            class="icon-btn"
+            type="button"
+            title="添加图片"
+            :disabled="disabled || isStreaming"
+            @click="pickImage"
+          >
+            📎
+          </button>
+          <button
+            v-if="isStreaming"
+            class="action-btn action-stop"
+            type="button"
+            title="停止生成"
+            @click="$emit('abort')"
+          >
+            ⏹
+          </button>
+          <button
+            v-else
+            class="action-btn action-send"
+            type="button"
+            :disabled="disabled || !canSend"
+            title="发送 (Enter)"
+            @click="submit"
+          >
+            ▶
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- 错误提示（附件校验等） -->
@@ -93,18 +114,26 @@
  * - 单张 > 10MB / 单次 > 6 张 拦截
  */
 import { ref, computed, nextTick, watch, onBeforeUnmount } from 'vue';
-import type { ChatAttachmentInput } from '@toolbox/bridge';
+import type { ChatAttachmentInput, ChatMode } from '@toolbox/bridge';
 
 const props = defineProps<{
   disabled?: boolean;
   isStreaming: boolean;
   placeholder?: string;
+  currentMode: ChatMode;
 }>();
 
 const emit = defineEmits<{
   submit: [payload: { text: string; attachments: ChatAttachmentInput[] }];
   abort: [];
+  'mode-change': [mode: ChatMode];
 }>();
+
+const MODES: { value: ChatMode; label: string; title: string }[] = [
+  { value: 'chat', label: 'Chat', title: 'Chat — Pure conversation, no tools, lowest token cost' },
+  { value: 'agent', label: 'Agent', title: 'Agent — Tools enabled, completed tool history trimmed to save tokens' },
+  { value: 'deep', label: 'Deep', title: 'Deep — Tools enabled, full tool history preserved for LLM reference' },
+];
 
 // ── 常量 ────────────────────────────────────────────────
 /** 单张图片最大字节数（10MB） */
@@ -404,15 +433,14 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-/* 主体 */
+/* 主体：纵向布局，textarea 在上，工具栏在下 */
 .composer-body {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: column;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 8px 10px;
+  padding: 10px 12px 8px;
   transition: border-color var(--transition);
 }
 .composer-body:focus-within {
@@ -420,18 +448,56 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
+.composer-textarea {
+  width: 100%;
+  resize: none;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  padding: 0;
+  max-height: 240px;
+  min-height: 22px;
+}
+.composer-textarea::placeholder {
+  color: var(--text-dim);
+}
+
+/* 工具栏行 */
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .icon-btn {
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 1.15rem;
+  font-size: 1rem;
   line-height: 1;
   padding: 0;
   color: var(--text-secondary);
-  border-radius: 8px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -446,31 +512,50 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
-.composer-textarea {
-  flex: 1;
-  resize: none;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: 0.92rem;
-  line-height: 1.5;
-  padding: 6px 4px;
-  max-height: 240px;
+/* 模式切换器：pill 按钮组 */
+.mode-switcher {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
-.composer-textarea::placeholder {
-  color: var(--text-dim);
+
+.mode-btn {
+  padding: 4px 11px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.73rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--transition), background var(--transition), color var(--transition);
+}
+
+.mode-btn:hover:not(:disabled):not(.active) {
+  border-color: var(--text-dim);
+  color: var(--text-primary);
+}
+
+.mode-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: var(--accent-light);
+}
+
+.mode-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .action-btn {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border-radius: 8px;
   border: none;
   color: #fff;
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -505,8 +590,8 @@ onBeforeUnmount(() => {
 }
 
 .composer-hint {
-  margin-top: 6px;
-  font-size: 0.72rem;
+  margin-top: 5px;
+  font-size: 0.70rem;
   color: var(--text-dim);
   text-align: center;
 }

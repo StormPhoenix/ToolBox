@@ -17,6 +17,7 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import type {
   ChatMessage,
+  ChatMode,
   ChatSession,
   SessionIndexEntry,
 } from './types';
@@ -125,11 +126,21 @@ export async function createSession(title?: string): Promise<ChatSession> {
     createdAt: now,
     updatedAt: now,
     messages: [],
+    mode: 'chat',
   };
   await atomicWrite(getSessionPath(session.id), JSON.stringify(session, null, 2));
   await updateIndexEntry(session);
   log.info(`createSession 创建: id=${session.id}, title=${session.title}`);
   return session;
+}
+
+/** 更新会话对话模式并持久化（UI 切换模式时立即调用） */
+export async function setSessionMode(id: string, mode: ChatMode): Promise<void> {
+  const session = await loadSession(id);
+  if (!session) throw new Error(`会话不存在: ${id}`);
+  session.mode = mode;
+  await saveSession(session);
+  log.info(`setSessionMode: id=${id}, mode=${mode}`);
 }
 
 export async function saveSession(session: ChatSession): Promise<void> {
