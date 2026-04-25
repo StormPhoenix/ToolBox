@@ -64,6 +64,15 @@ export interface ChatMessage {
    * regenerate 时据此回溯到完整对话轮次的起点。
    */
   toolRoundtrip?: boolean;
+  /**
+   * 标记此消息为兜底回复（LLM 返回空 content 时由引擎填充）。
+   *
+   * 用途：
+   *  - 持久化兜底文案保证关闭重开会话仍能看到完整轮次，避免 user 消息成为孤儿
+   *  - UI 据此使用淡色样式提示用户这不是模型真实回复
+   *  - prepareLLMMessages 仍照常带上，作为"上一次未生成回复"的明确历史信号
+   */
+  fallback?: boolean;
 }
 
 /** 单会话完整数据（持久化到 userData/chat-sessions/<id>.json） */

@@ -386,6 +386,13 @@ export interface ChatMessage {
   model?: { provider: LLMProviderType; model: string };
   /** 标记此消息是否为 tool 交互的中间步骤 */
   toolRoundtrip?: boolean;
+  /**
+   * 标记此消息为兜底回复（LLM 返回空 content 时由引擎填充）。
+   *
+   * UI 据此用淡色 + "占位回复" 角标渲染，提示用户这不是模型真实输出。
+   * 持久化保留，关闭重开会话仍能看到完整轮次，避免 user 消息成为孤儿。
+   */
+  fallback?: boolean;
 }
 
 /** 完整会话 */

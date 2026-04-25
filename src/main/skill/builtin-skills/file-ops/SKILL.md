@@ -61,8 +61,10 @@ metadata:
       - name: read_text_file
         displayName: "读取文件"
         description: |
-          读取文本文件的内容。支持常见文本格式（.txt, .md, .json, .csv, .log, .xml, .html, .js, .ts, .py 等）。
+          读取**本地文本文件**的内容。支持常见文本格式（.txt, .md, .json, .csv, .log, .xml, .html, .js, .ts, .py 等）。
           对于大文件可以指定只读取前 N 行。
+
+          ⚠️ 仅支持本地绝对路径，不能传入 http/https URL。需要读取网页内容请使用 web-fetch 的 `web_fetch`。
 
           使用场景：
           - 用户想查看某个配置文件的内容

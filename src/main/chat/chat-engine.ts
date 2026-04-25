@@ -48,8 +48,36 @@ const log = createLogger('ChatEngine');
 
 /** 周期性 stall 日志：长时间无响应时提示 */
 const STALL_WARN_INTERVAL_MS = 15_000;
-/** Agent 循环最大工具迭代次数（最后一轮不传 tools 强制 end_turn） */
-const MAX_TOOL_ITERATIONS = 5;
+/**
+ * Agent 循环最大工具迭代次数。
+ *
+ * 之所以是 8 而不是 5：
+ * - "总结网页"这类典型场景在 web_search → web_fetch 之后通常 2-3 轮就能完成
+ * - 复杂任务（搜索 → 抓取多源 → 计算 → 汇总）大概 4-6 轮
+ * - 留 2 轮余量给模型自我纠错（如某次抓取失败重试）
+ *
+ * 之所以不是 10：
+ * - 过大的上限会鼓励模型走"先搜几次再抓再读再总结"的废 token 链路
+ * - 实测 v2 dump 用了 8 轮恰好完成总结，再放宽收益不明显
+ *
+ * 最后一轮不再禁用 tools，而是注入一段"工具次数已用尽"的提示，
+ * 让模型基于已有信息直接给出最终回复。强制 disable tools 在某些情况下
+ * 会让模型"想再调一次但被截断"，输出空 content（旧 bug 即由此触发）。
+ */
+const MAX_TOOL_ITERATIONS = 8;
+
+/**
+ * 最后一轮注入的 system 提示前缀。
+ *
+ * 与 stableParts 拼接为一个 system 块，告知模型已无更多工具调用机会，
+ * 必须基于现有 user/assistant/tool_result 上下文直接给出最终文本回复。
+ *
+ * 为什么不放到独立 system 块：
+ *  - Claude 单 system 数组中的多块各自计费/缓存，独立块会破坏前缀缓存
+ *  - 直接拼到 stable 块尾部更简单，且最后一轮 cache miss 是可以接受的
+ */
+const LAST_ITERATION_SYSTEM_HINT =
+  '\n\n[系统提示] 你已用完工具调用次数，本轮起不能再调用任何工具。请基于上方已有的 user 消息、tool_result 和你的中间分析，**直接用文字给出最终回复**。如果信息不足以完成原始问题，也请明确告诉用户当前能给出的部分结论或为什么无法完成。';
 /**
  * 最近 K 条含图消息保留 base64，更早降级为占位文本。
  *
@@ -171,6 +199,27 @@ function isTextBlock(b: unknown): b is LLMTextBlock {
     b !== null &&
     (b as { type: string }).type === 'text'
   );
+}
+
+/**
+ * 在 system 参数末尾追加一段提示文本，返回新对象（不修改原 systemParam）。
+ *
+ * 兼容两种形态：
+ *  - 字符串 system：直接拼接
+ *  - 块数组 system：追加一个不带 cache_control 的新文本块（避免破坏前面块的缓存）
+ */
+function appendSystemHint(
+  systemParam: LLMSystemParam,
+  hint: string
+): LLMSystemParam {
+  if (!hint) return systemParam;
+  if (typeof systemParam === 'string') {
+    return systemParam ? systemParam + hint : hint.trimStart();
+  }
+  return [
+    ...systemParam,
+    { type: 'text', text: hint.trimStart() },
+  ];
 }
 
 // ─── 构造 user 消息：图片压缩落盘 → imageRef ─────────────
@@ -665,22 +714,29 @@ async function runStream(params: {
     while (iter < MAX_TOOL_ITERATIONS && !abort.signal.aborted) {
       iter++;
       const isLastIter = iter === MAX_TOOL_ITERATIONS;
-      // 最后一轮不传 tools，强制 LLM 给出文本回复
-      const currentTools = isLastIter ? undefined : tools;
+
+      // 最后一轮：保留 tools 让模型理解能力边界，但在 system 中追加"次数用尽"
+      // 提示，引导其直接用文字回复。这样比强制 disable tools 更稳定，
+      // 避免模型"想再调一次但被截断"返回空 content（参见 LAST_ITERATION_SYSTEM_HINT 注释）。
+      const currentSystemParam: LLMSystemParam = isLastIter
+        ? appendSystemHint(systemParam, LAST_ITERATION_SYSTEM_HINT)
+        : systemParam;
+      const currentTools = tools;
 
       let firstTokenMs = 0;
 
       log.info(
         `streamMessage 开始: sessionId=${sessionId}, requestId=${requestId}, ` +
           `iter=${iter}/${MAX_TOOL_ITERATIONS}, provider=${router.getProviderName()}, ` +
-          `messages=${llmMessages.length}, tools=${currentTools?.length ?? 0}`
+          `messages=${llmMessages.length}, tools=${currentTools?.length ?? 0}` +
+          (isLastIter ? ' [last-iter:hint-injected]' : '')
       );
 
       // 为本次调用设置 scene 上下文（Router 代理会自动 dump 请求/响应到磁盘）
       router.withScene('main-chat', { requestId, sessionId, iteration: iter });
 
       const response = await provider.streamMessage(
-        systemParam,
+        currentSystemParam,
         llmMessages,
         (delta) => {
           if (!firstTokenMs) {
@@ -708,16 +764,27 @@ async function runStream(params: {
         response.stop_reason === 'end_turn' ||
         response.stop_reason === 'max_tokens'
       ) {
-        const finalText = response.content
+        const rawText = response.content
           .filter(isTextBlock)
           .map((b) => b.text)
           .join('');
+
+        // 空内容兜底：模型偶尔会在 end_turn 时返回 content=[]（典型场景：
+        // 多轮工具调用后被强制收尾、或工具结果信息冗余导致模型迷失）。
+        // 此时如果直接持久化空字符串，UI 会出现"空气泡"，且关闭重开后
+        // user 消息成为孤儿，无法解释发生了什么。
+        // 因此用兜底文案占位，并打 fallback 标记供 UI 区分渲染。
+        const isEmpty = rawText.trim().length === 0;
+        const finalText = isEmpty
+          ? '本次未能生成最终回复。可能模型已用完工具调用次数或被现有信息困住，请点击重新生成或换一种方式提问。'
+          : rawText;
 
         const assistantMessage: ChatMessage = {
           id: randomUUID(),
           role: 'assistant',
           content: finalText,
           timestamp: Date.now(),
+          ...(isEmpty ? { fallback: true } : {}),
         };
 
         // 一次性持久化所有中间消息 + 最终消息
@@ -749,7 +816,7 @@ async function runStream(params: {
           : '';
         log.info(
           `streamMessage 完成: requestId=${requestId}, 耗时=${duration}ms, iters=${iter}, ` +
-            `text=${finalText.length} chars, usage=${usage ? `in=${usage.input_tokens},out=${usage.output_tokens}` : 'N/A'}${cacheInfo}`
+            `text=${finalText.length} chars${isEmpty ? ' [fallback]' : ''}, usage=${usage ? `in=${usage.input_tokens},out=${usage.output_tokens}` : 'N/A'}${cacheInfo}`
         );
         return;
       }
@@ -953,6 +1020,7 @@ async function runStream(params: {
       role: 'assistant',
       content: fallbackText,
       timestamp: Date.now(),
+      fallback: true,
     };
     await store.appendMessages(sessionId, [...pendingMessages, fallbackMsg]);
     onEvent({

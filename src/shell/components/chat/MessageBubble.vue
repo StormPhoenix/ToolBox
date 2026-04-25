@@ -68,7 +68,10 @@
         </div>
 
         <!-- ─── 普通态 ─── -->
-        <div v-else ref="bubbleRef" class="bubble">
+        <div v-else ref="bubbleRef" class="bubble" :class="{ 'bubble-fallback': isFallback }">
+          <div v-if="isFallback" class="bubble-fallback-badge" title="模型未生成回复，由系统填充的占位文本">
+            占位回复
+          </div>
           <!-- 图片网格（仅 user 消息会有） -->
           <div
             v-if="imageItems.length > 0"
@@ -226,6 +229,12 @@ function submitEditAction(): void {
     imageRefs: editImageRefs.value,
   });
 }
+
+// ── 兜底占位标记 ─────────────────────────────────────────
+
+const isFallback = computed(
+  () => props.message.role === 'assistant' && props.message.fallback === true
+);
 
 // ── 内容解析 ─────────────────────────────────────────────
 
@@ -487,4 +496,29 @@ function htmlProvider(): string | null {
 
 /* ── hover 工具栏 ─────────────────────────────── */
 .bubble-row:hover .bubble-toolbar-slot:not(.toolbar-locked) { opacity: 1; pointer-events: auto; }
+
+/* ── 兜底占位气泡（assistant 端 fallback=true） ─────── */
+.bubble.bubble-fallback {
+  background: var(--bg-base);
+  border-style: dashed;
+  border-color: var(--border);
+  color: var(--text-secondary);
+  position: relative;
+}
+.bubble.bubble-fallback :deep(p),
+.bubble.bubble-fallback :deep(li) {
+  color: var(--text-secondary);
+}
+.bubble-fallback-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
 </style>

@@ -11,12 +11,15 @@ metadata:
       - name: open_url
         displayName: "打开网页"
         description: |
-          在用户默认浏览器中打开一个网页链接。安全限制：仅允许 http/https 协议，拦截 localhost 和内网 IP 地址。
+          在用户默认浏览器中弹出一个网页链接。安全限制：仅允许 http/https 协议，拦截 localhost 和内网 IP 地址。
+
+          ⚠️ 此工具**只是在用户的浏览器中打开页面**，不会返回页面内容，因此**不能用于"总结/分析/翻译网页内容"**。
+          需要让 AI 阅读网页正文请使用 web-fetch 的 `web_fetch`。
 
           使用场景：
-          - 用户说"帮我打开 xxx 网站"
-          - 搜索到有用链接后帮用户打开
-          - 需要在浏览器中查看某个页面
+          - 用户说"帮我打开 xxx 网站" / "帮我访问这个链接"
+          - 搜索到有用链接后帮用户打开方便他自己看
+          - 任务完成后展示参考链接给用户
         inputSchema:
           type: object
           properties:

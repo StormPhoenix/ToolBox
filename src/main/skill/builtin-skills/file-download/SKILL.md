@@ -11,7 +11,16 @@ metadata:
       - name: download_file
         displayName: "下载文件"
         description: |
-          从 URL 下载文件到本地磁盘。默认保存到系统 Downloads 目录。
+          从 URL 下载文件到本地磁盘，**仅用于把文件保存到用户电脑供后续使用**。默认保存到系统 Downloads 目录。
+
+          ⚠️ 不要把它当作"读取网页正文"的手段：
+          - 用户给了 URL 让你"总结/分析/翻译/解释"网页内容 → 请直接用 web-fetch 的 `web_fetch`
+          - 不要走 download_file → read_text_file 这条绕路链路（污染 Downloads 目录、慢、且可能违反用户预期）
+
+          适用场景：
+          - 用户说"帮我下载这个文件" / "帮我把这个保存到电脑"
+          - 用户需要安装包、图片、PDF、压缩包等二进制资源
+          - 配合 web_search 搜到资源后下载
 
           参数:
           - url (必填): 要下载的文件 URL（必须是 http:// 或 https://）

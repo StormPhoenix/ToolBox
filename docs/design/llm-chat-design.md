@@ -202,14 +202,31 @@ Chat Engine 默认通过 IPC 入口启用工具调用。每次请求开始时，
 ### 8.1 Agent 循环
 
 ```
-while iter < 5:
-  1. 获取 tools；最后一轮不传 tools，强制模型给出文本回复
+while iter < 8:
+  1. 获取 tools；最后一轮（iter === 8）继续传 tools，但在 system 中追加
+     "工具次数已用尽，请基于已有信息直接给出最终回复" 的提示
   2. 调用 provider.streamMessage(...)
-  3. end_turn / max_tokens → 持久化最终 assistant 回复，发送 stream-end
+  3. end_turn / max_tokens →
+       - 若返回 content 非空 → 持久化最终 assistant 回复
+       - 若返回 content 为空（典型场景：工具用尽后模型仍试图调用却被截断）
+         → 持久化兜底文案占位（带 fallback=true 标记，UI 淡色 + "占位回复" 角标）
+     发送 stream-end
   4. tool_use → 执行工具，把 tool_result 回注为 user 消息，进入下一轮
 ```
 
 工具中间消息会持久化为普通 `ChatMessage`，并带 `toolRoundtrip: true`。重新生成时会回溯并丢弃相关中间消息，避免只截断最终 assistant 回复导致 tool_use / tool_result 残留。
+
+**最大轮数 8 而非更小**：`web-fetch + web-search` 等场景下，"搜索 → 抓正文 → 总结" 通常 2-3 轮即可结束；预留更多余量给模型自我纠错（如某次抓取失败重试）。
+
+**最后一轮不强制 disable tools**：之前曾尝试过最后一轮不传 tools 强制给文本，结果模型偶尔返回 `content=[]` 造成空气泡（fallback 机制即为此而设）。改为保留 tools + 注入提示后稳定性更好。
+
+### 8.1.1 兜底回复机制
+
+`stop_reason === 'end_turn' / 'max_tokens'` 但 `content` 为空时，引擎会写入一条带 `fallback: true` 标记的 assistant 消息：
+
+> 本次未能生成最终回复。可能模型已用完工具调用次数或被现有信息困住，请点击重新生成或换一种方式提问。
+
+UI 会用淡色边框 + "占位回复" 角标渲染，且持久化保留，避免重新打开会话时 user 消息成为孤儿；`prepareLLMMessages` 仍照常带上历史，作为"上一次未生成回复"的明确信号。
 
 ### 8.2 确认决策
 

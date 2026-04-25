@@ -95,20 +95,21 @@ metadata:
 
 ---
 
-## 3. 内置 Skill 清单（11 个）
+## 3. 内置 Skill 清单（12 个）
 
-### 3.1 SAFE 工具（无需确认，8 个 Skill / 16 个工具）
+### 3.1 SAFE 工具（无需确认，9 个 Skill / 17 个工具）
 
 | Skill | 工具 | 功能 |
 |---|---|---|
-| **web-search** 🔍 | `web_search` | DuckDuckGo 搜索，返回标题/URL/摘要 |
+| **web-search** 🔍 | `web_search` | DuckDuckGo 搜索，返回标题/URL/摘要（**不含正文**） |
+| **web-fetch** 🌐 | `web_fetch` | 抓取一个 http/https URL 的页面正文供 LLM 阅读/总结，自动处理 GitHub 仓库主页改写到 raw README |
 | **quick-calc** 🔢 | `quick_calc` | 数学表达式 / 单位换算 / 日期计算 |
 | **text-transform** 🔤 | `text_transform` | JSON/Base64/URL/哈希/UUID/大小写/字数/正则 |
 | **clipboard-ops** 📋 | `read_clipboard` / `write_clipboard` | 系统剪贴板读写 |
 | **system-info** 💻 | `system_info` | 时间/日期/OS/内存查询 |
-| **file-ops** 📂 | `list_directory` / `file_info` / `read_text_file` / `search_files` / `get_path` / `inspect_path` | 文件系统只读操作 |
-| **safe-desktop** 🔔 | `open_url` / `send_notification` / `open_directory` / `show_in_explorer` / `reveal_path` | 打开网页/通知/文件管理器 |
-| **file-download** ⬇️ | `download_file` | 下载文件到 Downloads 目录 |
+| **file-ops** 📂 | `list_directory` / `file_info` / `read_text_file` / `search_files` / `get_path` / `inspect_path` | 文件系统只读操作（**仅本地路径**） |
+| **safe-desktop** 🔔 | `open_url` / `send_notification` / `open_directory` / `show_in_explorer` / `reveal_path` | 打开网页/通知/文件管理器（`open_url` 只在浏览器弹页面，**不返回正文**） |
+| **file-download** ⬇️ | `download_file` | 下载文件到 Downloads 目录（**不用于读取网页正文**） |
 
 ### 3.2 MODERATE 工具（需用户确认，3 个 Skill / 9 个工具）
 
@@ -120,7 +121,7 @@ metadata:
 
 ### 3.3 工具总数
 
-- 11 个 Skill，27 个工具
+- 12 个 Skill，28 个工具
 - 默认全部启用，可在 Settings → 技能扩展中按 Skill 粒度禁用
 - 全部零 npm 依赖，通过 `build:skills` 脚本原样拷贝到 `dist/main/skill/builtin-skills/`
 
@@ -199,10 +200,13 @@ src/main/skill/
 ├── skill-registry.ts         # 注册表：toolIndex / execute / 确认判断 / 信任管理
 ├── skill-config.ts           # 持久化（disabled / trustedTools）读写
 ├── skill-ipc.ts              # IPC handlers + initializeSkillSystem
-└── builtin-skills/           # 11 个内置 Skill（打包时拷贝到 dist）
+└── builtin-skills/           # 12 个内置 Skill（打包时拷贝到 dist）
     ├── web-search/
     │   ├── SKILL.md
     │   └── scripts/web-search.cjs
+    ├── web-fetch/
+    │   ├── SKILL.md
+    │   └── scripts/web-fetch.cjs
     ├── quick-calc/
     ├── text-transform/
     ├── clipboard-ops/
@@ -271,7 +275,7 @@ interface SkillContext {
 
 ### 5.5 Agent 循环集成（chat-engine）
 
-Chat Engine 的 `runStream()` 是一个 `while (iter < MAX_TOOL_ITERATIONS)` 循环（`MAX_TOOL_ITERATIONS = 5`）：
+Chat Engine 的 `runStream()` 是一个 `while (iter < MAX_TOOL_ITERATIONS)` 循环（`MAX_TOOL_ITERATIONS = 8`）：
 
 ```
 每轮迭代：
@@ -288,7 +292,9 @@ Chat Engine 的 `runStream()` 是一个 `while (iter < MAX_TOOL_ITERATIONS)` 循
          4.2.5 emit 'tool-done'
      4.3 持久化 user(tool_result) 中间消息（toolRoundtrip=true）
      4.4 continue
-  5. 最后一轮（iter === MAX_TOOL_ITERATIONS）不传 tools，强制 LLM 给文本回复
+  5. 最后一轮（iter === MAX_TOOL_ITERATIONS）继续传 tools，但在 system 中追加
+     "工具次数已用尽，请基于已有信息直接给出最终回复" 的提示，
+     引导模型用文字收尾（强制 disable tools 易导致空 content，参见 chat-engine.ts 注释）
 ```
 
 `toolRoundtrip: true` 标记的中间消息在 `regenerateMessage()` 时会被一并丢弃，避免重新生成只处理最后一条 assistant。

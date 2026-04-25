@@ -66,8 +66,9 @@ ToolBox/
 │   │       ├── skill-registry.ts     # 单例注册表 + 执行路由 + 风险判断 + 信任管理
 │   │       ├── skill-config.ts       # userData/skill-config.json 读写（disabled + trustedTools）
 │   │       ├── skill-ipc.ts          # IPC handlers + initializeSkillSystem
-│   │       └── builtin-skills/       # 11 个内置 Skill（构建时由 copy-skills 拷贝到 dist）
-│   │           ├── web-search/       # 🔍 DuckDuckGo 联网搜索
+│   │       └── builtin-skills/       # 12 个内置 Skill（构建时由 copy-skills 拷贝到 dist）
+│   │           ├── web-search/       # 🔍 DuckDuckGo 联网搜索（仅摘要）
+│   │           ├── web-fetch/        # 🌐 抓取 URL 正文供 LLM 阅读/总结
 │   │           ├── quick-calc/       # 🔢 数学/单位/日期计算
 │   │           ├── text-transform/   # 🔤 JSON/Base64/哈希/UUID 等文本处理
 │   │           ├── clipboard-ops/    # 📋 剪贴板读写
@@ -225,7 +226,7 @@ Skill 是为 LLM Chat 对话提供**工具调用能力**的声明式扩展机制
 - **零 npm 依赖**：内置 Skill 脚本只能用 Electron / Node 内置模块
 - **用户级 Skill**：放入 `userData/skills/` 下，重启应用自动加载，可覆盖同名内置 Skill
 
-**11 个内置 Skill** 共 27 个工具，覆盖搜索、计算、文本处理、剪贴板、文件读写、应用启动、脚本执行等能力。详细清单、SKILL.md 规范、确认流程、打包策略详见 [`docs/tech/skill-system.md`](docs/tech/skill-system.md)。
+**12 个内置 Skill** 共 28 个工具，覆盖搜索、抓取网页正文、计算、文本处理、剪贴板、文件读写、应用启动、脚本执行等能力。详细清单、SKILL.md 规范、确认流程、打包策略详见 [`docs/tech/skill-system.md`](docs/tech/skill-system.md)。
 
 ### 3.5 Electron 安全规则（强制）
 
@@ -471,7 +472,7 @@ const msg = buildMultiImageMessage(
 | `docs/design/image-resize-plugin-design.md` | 需求/设计 | 图像分辨率调整插件功能规格、Resize Provider 架构、IPC 扩展方案 |
 | `docs/design/llm-chat-design.md` | 需求/设计 | LLM Chat 对话功能（V1 纯对话）：引擎架构、IPC、UI 布局 |
 | `docs/tech/llm-framework.md` | 技术 | LLM 框架架构、Provider 配置、插件调用指南 |
-| `docs/tech/skill-system.md` | 技术 | Skill 系统架构：SKILL.md 规范、11 个内置 Skill、两级风险体系、确认弹窗、打包策略 |
+| `docs/tech/skill-system.md` | 技术 | Skill 系统架构：SKILL.md 规范、12 个内置 Skill、两级风险体系、确认弹窗、打包策略 |
 | `docs/tech/llm-debug.md` | 技术 | LLM 调试与 Prompt Dump：文件结构、典型排查场景、安全隐私说明 |
 | `docs/design/backlog.md` | 需求/设计 | 待评估 / 待开发的需求想法积压池（Backlog），按桌面效率 / 学习辅助 / 认知提升分组 |
 | `docs/design/plugin-llm-interface-design.md` | 需求/设计 | 插件 LLM 接口规范：现存问题分析（进程隔离、UI 耦合、能力重叠）与架构方向（插件服务层） |

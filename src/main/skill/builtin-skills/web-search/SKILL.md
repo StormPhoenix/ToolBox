@@ -26,6 +26,8 @@ metadata:
           - 纯粹的闲聊或情感交流
 
           注意：返回的是搜索结果摘要（标题+摘要+URL），不是完整网页内容。
+          如果用户给了具体 URL 让你"总结/分析/翻译/解释"网页内容，请直接使用 web-fetch 的 `web_fetch` 工具读取正文，
+          不要先 web_search 再 download_file 再 read_text_file 这种绕路链路。
         inputSchema:
           type: object
           properties:
@@ -57,3 +59,9 @@ metadata:
 - 搜索结果是摘要，引用时注明来源 URL
 - 如果搜索失败（网络问题），坦诚告知用户
 - 搜索关键词尽量精炼，不要用完整句子
+
+## 与 web-fetch 的分工
+
+- 用户说"帮我搜一下 XXX 是什么" → `web_search` 拿候选链接
+- 用户给了具体 URL 让你"总结/分析/翻译/解释" → 直接用 `web-fetch` 的 `web_fetch`，**不要走 web_search**
+- 搜到候选链接但需要深读其中某条 → 在 `web_search` 之后再用 `web_fetch` 读正文
