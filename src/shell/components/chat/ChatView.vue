@@ -80,8 +80,10 @@
           ref="composerRef"
           :is-streaming="isStreaming"
           :disabled="!llmAvailable"
+          :current-mode="sessionMode"
           @submit="onSubmit"
           @abort="abort"
+          @mode-change="setSessionMode"
         />
         <SelectionToolbar
           v-if="selectionMode"
@@ -195,6 +197,9 @@ const {
   enterEditing,
   exitEditing,
   submitEdit,
+  // mode
+  sessionMode,
+  setSessionMode,
 } = useChat();
 
 // ── LLM 配置状态 ─────────────────────────────────────────

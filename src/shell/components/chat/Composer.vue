@@ -74,8 +74,24 @@
       {{ warnMessage }}
     </div>
 
-    <div class="composer-hint">
-      Enter 发送 · Shift + Enter 换行 · Esc 停止 · 单张 ≤ 10MB · 最多 {{ MAX_ATTACHMENTS }} 张
+    <div class="composer-footer">
+      <div class="mode-switcher">
+        <button
+          v-for="m in MODES"
+          :key="m.value"
+          class="mode-btn"
+          :class="{ active: currentMode === m.value }"
+          :title="m.title"
+          :disabled="isStreaming"
+          type="button"
+          @click="emit('mode-change', m.value)"
+        >
+          {{ m.label }}
+        </button>
+      </div>
+      <div class="composer-hint">
+        Enter 发送 · Shift+Enter 换行 · 单张 ≤ 10MB · 最多 {{ MAX_ATTACHMENTS }} 张
+      </div>
     </div>
   </div>
 </template>
@@ -93,18 +109,26 @@
  * - 单张 > 10MB / 单次 > 6 张 拦截
  */
 import { ref, computed, nextTick, watch, onBeforeUnmount } from 'vue';
-import type { ChatAttachmentInput } from '@toolbox/bridge';
+import type { ChatAttachmentInput, ChatMode } from '@toolbox/bridge';
 
 const props = defineProps<{
   disabled?: boolean;
   isStreaming: boolean;
   placeholder?: string;
+  currentMode: ChatMode;
 }>();
 
 const emit = defineEmits<{
   submit: [payload: { text: string; attachments: ChatAttachmentInput[] }];
   abort: [];
+  'mode-change': [mode: ChatMode];
 }>();
+
+const MODES: { value: ChatMode; label: string; title: string }[] = [
+  { value: 'chat', label: '对话', title: '纯对话模式：不调用工具，token 消耗最少' },
+  { value: 'agent', label: '智能体', title: '智能体模式：启用工具调用，自动剔除历史工具记录节省 token' },
+  { value: 'deep', label: '深度', title: '深度模式：启用工具调用，保留完整工具历史供 LLM 参考' },
+];
 
 // ── 常量 ────────────────────────────────────────────────
 /** 单张图片最大字节数（10MB） */
@@ -504,10 +528,53 @@ onBeforeUnmount(() => {
   padding: 6px 10px;
 }
 
-.composer-hint {
+.composer-footer {
   margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mode-switcher {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.mode-btn {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+}
+
+.mode-btn:hover:not(:disabled):not(.active) {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.mode-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.composer-hint {
   font-size: 0.72rem;
   color: var(--text-dim);
-  text-align: center;
+  white-space: nowrap;
 }
 </style>

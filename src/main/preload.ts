@@ -96,6 +96,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chatClearContext: (id: string) =>
     ipcRenderer.invoke('chat:clear-context', id),
 
+  chatSetSessionMode: (sessionId: string, mode: unknown) =>
+    ipcRenderer.invoke('chat:set-session-mode', sessionId, mode),
+
   chatSend: (input: unknown) =>
     ipcRenderer.invoke('chat:send', input),
 

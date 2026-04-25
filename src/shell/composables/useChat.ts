@@ -19,6 +19,7 @@ import { ref, computed, watch, onUnmounted } from 'vue';
 import type {
   ChatEvent,
   ChatMessage,
+  ChatMode,
   ChatSession,
   SessionIndexEntry,
   ChatAttachmentInput,
@@ -74,6 +75,9 @@ const selectedIds = ref<Set<string>>(new Set());
 
 // 编辑态
 const editingMessageId = ref<string | null>(null);
+
+// 对话模式（从 session 读取，切换时立即持久化）
+const sessionMode = ref<ChatMode>('chat');
 
 let eventDisposer: (() => void) | null = null;
 let initialized = false;
@@ -225,6 +229,7 @@ async function selectSession(id: string): Promise<void> {
     return;
   }
   activeSession.value = session;
+  sessionMode.value = session.mode ?? 'chat';
   streamingText.value = '';
   currentRequestId.value = null;
   lastError.value = null;
@@ -233,11 +238,24 @@ async function selectSession(id: string): Promise<void> {
 async function createSession(): Promise<ChatSession> {
   const session = await window.electronAPI.chatCreateSession();
   activeSession.value = session;
+  sessionMode.value = session.mode ?? 'chat';
   streamingText.value = '';
   currentRequestId.value = null;
   lastError.value = null;
   await refreshSessions();
   return session;
+}
+
+/** 切换对话模式并立即持久化到 session */
+async function setSessionMode(mode: ChatMode): Promise<void> {
+  if (!activeSession.value) return;
+  sessionMode.value = mode;
+  activeSession.value.mode = mode;
+  try {
+    await window.electronAPI.chatSetSessionMode(activeSession.value.id, mode);
+  } catch (err) {
+    lastError.value = (err as Error).message;
+  }
 }
 
 async function deleteSession(id: string): Promise<void> {
@@ -317,6 +335,7 @@ async function sendMessage(
       sessionId,
       userText,
       attachments: plainAttachments,
+      mode: sessionMode.value,
     });
     // 用主进程返回的真实 id 替换乐观 id
     optimisticUserMsg.id = result.userMessageId;
@@ -456,6 +475,7 @@ async function regenerateMessage(assistantMessageId: string): Promise<void> {
     const result = await window.electronAPI.chatRegenerate({
       sessionId: activeSession.value.id,
       assistantMessageId,
+      mode: sessionMode.value,
     });
     currentRequestId.value = result.requestId;
   } catch (err) {
@@ -538,6 +558,7 @@ async function submitEdit(
       targetMessageId,
       newText,
       imageRefs: plainRefs,
+      mode: sessionMode.value,
     });
 
     // 乐观追加新 user 消息（含 imageRef，保证图片立即可见）
@@ -630,6 +651,10 @@ export function useChat() {
     enterEditing,
     exitEditing,
     submitEdit,
+
+    // mode
+    sessionMode,
+    setSessionMode,
   };
 }
 

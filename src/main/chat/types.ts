@@ -22,6 +22,17 @@ export interface PersistedToolResultBlock {
   is_error?: boolean;
 }
 
+// ─── 对话模式 ──────────────────────────────────────────────
+
+/**
+ * 对话模式，per-request 参数，同时作为 session 级别的默认值持久化。
+ *
+ * - chat：纯对话，不带 tools 也不带 Skill instructions；历史 toolRoundtrip 全部剔除
+ * - agent：智能体，带 tools + Skill instructions；历史已完成的 toolRoundtrip 全部剔除
+ * - deep：深度模式，带 tools + Skill instructions；历史 toolRoundtrip 全部保留（原始输入/输出）
+ */
+export type ChatMode = 'chat' | 'agent' | 'deep';
+
 // ─── 会话与消息 ────────────────────────────────────────────
 
 /**
@@ -84,6 +95,12 @@ export interface ChatSession {
   /** 可选 system prompt，V1 为空字符串或未定义 */
   systemPrompt?: string;
   messages: ChatMessage[];
+  /**
+   * 会话当前对话模式，作为 per-request mode 的默认值。
+   * 新建会话默认 'chat'；用户切换后立即持久化。
+   * 旧会话（无此字段）读取时视为 'chat'。
+   */
+  mode?: ChatMode;
 }
 
 /**
@@ -186,6 +203,8 @@ export interface ChatSendInput {
   sessionId: string;
   userText: string;
   attachments?: ChatAttachmentInput[];
+  /** 本次请求使用的对话模式，不传时取会话默认值，最终兜底为 'agent' */
+  mode?: ChatMode;
 }
 
 /** chat:send 出参：立即返回 requestId，真实内容通过 chat:event 推送 */
