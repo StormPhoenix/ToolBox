@@ -47,6 +47,18 @@ const toolResults = ref<Array<{
   summary: string;
 }>>([]);
 
+/**
+ * 当前请求周期内累积的"中间叙述"文本片段（assistant 在每轮工具调用前的 narration）。
+ *
+ * 设计要点：
+ * - chat-engine 在每轮 tool_use 前发出 'stream-reset' 事件，前端把 streamingText 归档为一段 narration
+ *   推入此数组，再清空 streamingText
+ * - 这些 narration 在 ToolCallBubble 上方按时间顺序展示，让用户看到"模型为什么调这个工具"
+ * - 仅当前请求周期可见；stream-end / error / aborted 时一并清空，关闭重开会话不重现
+ *   （持久化由后端 toolRoundtrip 消息中的 text 块兜底，未来若需历史可见再单独做）
+ */
+const narrationsThisRequest = ref<string[]>([]);
+
 /** 等待用户响应的工具确认请求（同一时间最多一个） */
 const pendingConfirm = ref<{
   confirmId: string;
@@ -77,10 +89,16 @@ function handleChatEvent(event: ChatEvent): void {
       streamingText.value += event.text;
       break;
 
-    case 'stream-reset':
-      // 工具调用开始前清空正在显示的中间文本
+    case 'stream-reset': {
+      // 工具调用开始前：把当前 streamingText 归档为一段 narration，再清空 streamingText。
+      // 这样用户能在 ToolCallBubble 上方继续看到"模型刚才说的话"，而不是它突然消失。
+      const trimmed = streamingText.value.trim();
+      if (trimmed.length > 0) {
+        narrationsThisRequest.value = [...narrationsThisRequest.value, trimmed];
+      }
       streamingText.value = '';
       break;
+    }
 
     case 'tool-executing':
       toolExecuting.value = {
@@ -119,6 +137,7 @@ function handleChatEvent(event: ChatEvent): void {
       lastError.value = null;
       toolExecuting.value = null;
       toolResults.value = [];
+      narrationsThisRequest.value = [];
       pendingConfirm.value = null;
       // 从主进程重新加载会话：把乐观版本的 image 块替换为已落盘的 image_ref
       // 同时追加刚生成的 assistant 消息（主进程已持久化）
@@ -141,6 +160,7 @@ function handleChatEvent(event: ChatEvent): void {
       currentRequestId.value = null;
       toolExecuting.value = null;
       toolResults.value = [];
+      narrationsThisRequest.value = [];
       pendingConfirm.value = null;
       // 错误后也重新加载一次：主进程可能已剥离图片引用
       if (activeSession.value) {
@@ -158,6 +178,7 @@ function handleChatEvent(event: ChatEvent): void {
       currentRequestId.value = null;
       toolExecuting.value = null;
       toolResults.value = [];
+      narrationsThisRequest.value = [];
       pendingConfirm.value = null;
       break;
   }
@@ -574,6 +595,7 @@ export function useChat() {
     // tool call state
     toolExecuting,
     toolResults,
+    narrationsThisRequest,
     pendingConfirm,
 
     // selection state

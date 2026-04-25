@@ -228,6 +228,14 @@ while iter < 8:
 
 UI 会用淡色边框 + "占位回复" 角标渲染，且持久化保留，避免重新打开会话时 user 消息成为孤儿；`prepareLLMMessages` 仍照常带上历史，作为"上一次未生成回复"的明确信号。
 
+### 8.1.2 中间叙述（narration）可见性
+
+模型在每轮 `tool_use` 之前可能输出一段叙述文本（"我先搜一下"、"让我打开这个网页查看"），用于解释下一步要做什么。
+
+`chat-engine` 在 `tool_use` 分支会发出一次 `stream-reset` 事件。前端 `useChat` 收到时会把当前 `streamingText` 归档到 `narrationsThisRequest: string[]`，再清空 streamingText。`MessageList` 把数组透传给 `ToolCallBubble`，在工具行上方按时间顺序渲染为淡色斜体文本，让用户始终能看到"模型为什么调这个工具"。
+
+作用域：narration 仅在当前请求生命周期内可见，`stream-end / error / aborted` 时一并清空。重新打开会话不重现 narration（持久化由后端 `toolRoundtrip=true` 的 assistant 消息中的 text 块兜底，未来若需历史可见可在 `useChat` 的 messages computed 中按需展开 toolRoundtrip text）。
+
 ### 8.2 确认决策
 
 | 决策 | 行为 |

@@ -60,6 +60,7 @@
           :editing-message-id="editingMessageId"
           :tool-executing="toolExecuting"
           :tool-results="toolResults"
+          :narrations="narrationsThisRequest"
           @dismiss-error="dismissError"
           @resend-image="onResendImage"
           @open-lightbox="onOpenLightbox"
@@ -168,6 +169,7 @@ const {
   // tool call state
   toolExecuting,
   toolResults,
+  narrationsThisRequest,
   pendingConfirm,
   // selection
   selectionMode,
