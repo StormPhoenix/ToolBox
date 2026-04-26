@@ -8,7 +8,7 @@
 ## 平台能力
 
 - [ ] **插件 LLM 接口规范** — 制定插件侧向 LLM 暴露工具的接口标准，使插件能声明可被 LLM 调用的能力（类似 Skill 系统，但面向插件生态，扩展 Agent 的桌面工具集）；问题分析见 [`docs/design/plugin-llm-interface-design.md`](plugin-llm-interface-design.md)
-- [ ] **LLM 人格管理** — 支持从材料（文章/书籍/人物描述）中提取思维模式和人设，生成可切换的 LLM Persona，对话时按场景切换视角（如"苏格拉底模式"、"产品经理模式"）
+- [ ] **LLM 思维角色（Persona）** — 把「工具能力」与「角色 / 思维方式」解耦为正交两轴：在 `chat` / `agent` / `deep` 任意模式下都允许会话级单选一个纯 prompt Skill 作为当前角色（如「苏格拉底模式」「产品经理模式」「代码评审教练」），独立于工具开关注入到 system prompt；后续可扩展「从材料（文章/书籍/人物描述）自动生成 Persona Skill」的上层工作流。详细需求规格见 [`docs/design/persona-feature-design.md`](persona-feature-design.md)
 - [ ] **工具后台静默运行** — Toolbox 工具支持在无前台窗口的情况下持续运行（如定时任务、文件监听、剪贴板监控），不依赖用户打开插件界面
 
 ---
