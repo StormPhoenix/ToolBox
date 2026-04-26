@@ -270,12 +270,13 @@ Skill 是为 LLM Chat 对话提供**工具调用能力**的声明式扩展机制
 | `chatDeleteSession(id)` | `chat:delete-session` | 删除会话 |
 | `chatRenameSession(id, title)` | `chat:rename-session` | 重命名会话 |
 | `chatClearContext(id)` | `chat:clear-context` | 清空会话消息（保留会话） |
-| `chatSend(input)` | `chat:send` | 发送用户消息；立即返回 `{ requestId, userMessageId }`，真实回复通过 `chat:event` 事件流推送 |
+| `chatSetSessionMode(sessionId, mode)` | `chat:set-session-mode` | 更新会话对话模式（`'chat' \| 'agent' \| 'deep'`）并立即持久化；UI 切换模式时调用 |
+| `chatSend(input)` | `chat:send` | 发送用户消息（`input.mode` 指定本次对话模式）；立即返回 `{ requestId, userMessageId }`，真实回复通过 `chat:event` 事件流推送 |
 | `chatAbort(requestId)` | `chat:abort` | 中止指定进行中的请求 |
 | `chatResendImageRef(ref)` | `chat:resend-image-ref` | 根据历史 `imageRef` 读缓存文件返回 `ChatAttachmentInput`，供 Composer 再次使用 |
 | `chatExportSelected(input)` | `chat:export-selected` | 把选中的消息合并导出为 Markdown 文件；在 targetPath 同级创建 `<stem>/` 子目录，写入 `.md` 和 `images/` 子目录 |
-| `chatRegenerate(input)` | `chat:regenerate` | 重新生成指定 assistant 消息：截断该消息（含）及后续所有消息，基于截断后上下文重新调用 LLM 流式生成 |
-| `chatEditAndResend(input)` | `chat:edit-and-resend` | 编辑某条 user 消息并重发：截断该消息（含）及后续所有消息，用修改后文本 + 原图片引用构造新 user 消息并流式生成 |
+| `chatRegenerate(input)` | `chat:regenerate` | 重新生成指定 assistant 消息（`input.mode` 指定本次模式）：截断该消息（含）及后续所有消息，基于截断后上下文重新调用 LLM 流式生成 |
+| `chatEditAndResend(input)` | `chat:edit-and-resend` | 编辑某条 user 消息并重发（`input.mode` 指定本次模式）：截断该消息（含）及后续所有消息，用修改后文本 + 原图片引用构造新 user 消息并流式生成 |
 | `chatConfirmResponse(input)` | `chat:confirm-response` | 响应工具确认请求（对 `tool-confirm-request` 事件的回复）。`decision`: `approved` \| `approved-all` \| `trusted` \| `rejected` |
 | `onChatEvent(cb)` | `chat:event`（push） | 订阅 Chat 事件流（`stream-chunk` / `stream-end` / `stream-reset` / `tool-executing` / `tool-done` / `tool-confirm-request` / `error` / `aborted`），返回 dispose 函数 |
 | `skillList()` | `skill:list` | 获取所有 Skill 状态列表（`name` / `description` / `emoji` / `builtin` / `enabled` / `toolCount`） |
