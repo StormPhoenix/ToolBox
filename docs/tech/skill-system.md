@@ -303,6 +303,9 @@ Chat Engine 的 `runStream()` 是一个 `while (iter < MAX_TOOL_ITERATIONS)` 循
 
 ## 6. 新增 Skill 步骤
 
+> **快速上手请直接看** [`docs/use/skill-authoring.md`](../use/skill-authoring.md)（操作型指南：必填字段、完整示例、内置 vs 用户级 Skill 差异、常见坑）。
+> 本节仅保留极简流程，作为架构层的速查。
+
 ### 6.1 SAFE Skill（无需确认）
 
 以新增一个"天气查询"Skill 为例：

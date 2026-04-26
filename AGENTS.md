@@ -473,6 +473,7 @@ const msg = buildMultiImageMessage(
 | `docs/design/llm-chat-design.md` | 需求/设计 | LLM Chat 对话功能（V1 纯对话）：引擎架构、IPC、UI 布局 |
 | `docs/tech/llm-framework.md` | 技术 | LLM 框架架构、Provider 配置、插件调用指南 |
 | `docs/tech/skill-system.md` | 技术 | Skill 系统架构：SKILL.md 规范、12 个内置 Skill、两级风险体系、确认弹窗、打包策略 |
+| `docs/use/skill-authoring.md` | 使用指南 | Skill 编写指南：SKILL.md 结构、必填字段、脚本契约、内置 vs 用户级 Skill 区别、纯 prompt Skill（角色卡 / 思维框架）模式与失效场景、完整示例与常见坑 |
 | `docs/tech/llm-debug.md` | 技术 | LLM 调试与 Prompt Dump：文件结构、典型排查场景、安全隐私说明 |
 | `docs/design/backlog.md` | 需求/设计 | 待评估 / 待开发的需求想法积压池（Backlog），按桌面效率 / 学习辅助 / 认知提升分组 |
 | `docs/design/plugin-llm-interface-design.md` | 需求/设计 | 插件 LLM 接口规范：现存问题分析（进程隔离、UI 耦合、能力重叠）与架构方向（插件服务层） |
