@@ -9,23 +9,14 @@
       <div class="modal-subtitle">{{ subtitle }}</div>
 
       <div class="recipe-grid">
-        <div
+        <RecipeCard
           v-for="r in recipes"
           :key="r.name"
-          class="recipe-card"
-          :class="{ selected: selected === r.name }"
+          :recipe="r"
+          :selected="selected === r.name"
           @click="selected = r.name"
           @dblclick="confirm"
-        >
-          <div class="recipe-name">{{ r.name }}</div>
-          <div class="recipe-desc" :title="r.description">
-            {{ truncate(r.description, 80) }}
-          </div>
-          <div v-if="r.suitable_for?.length" class="recipe-tags">
-            <span v-for="t in r.suitable_for" :key="t" class="tag">{{ t }}</span>
-          </div>
-          <div v-if="r.builtin" class="builtin-badge">内置</div>
-        </div>
+        />
       </div>
 
       <div v-if="recipes.length === 0" class="empty-recipes">
@@ -50,6 +41,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import type { PersonaRecipeInfo } from '@toolbox/bridge';
+import RecipeCard from './RecipeCard.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -87,12 +79,6 @@ watch(
 
 function confirm(): void {
   if (selected.value) emit('select', selected.value);
-}
-
-/** 字符截断，超长加省略号；长描述时鼠标悬停可看完整版（title 属性） */
-function truncate(text: string, max: number): string {
-  if (!text) return '';
-  return text.length > max ? text.slice(0, max) + '…' : text;
 }
 </script>
 
@@ -165,68 +151,6 @@ function truncate(text: string, max: number): string {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
-}
-
-.recipe-card {
-  position: relative;
-  padding: 14px 16px;
-  background: var(--bg-base);
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: border-color var(--transition), background var(--transition);
-}
-.recipe-card:hover {
-  border-color: var(--accent-light);
-  background: var(--bg-card-hover);
-}
-.recipe-card.selected {
-  border-color: var(--accent);
-  background: var(--bg-active);
-}
-
-.recipe-name {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 6px;
-  padding-right: 36px; /* 留位给 builtin 徽标 */
-}
-.recipe-card.selected .recipe-name {
-  color: var(--accent-light);
-}
-
-.recipe-desc {
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  line-height: 1.45;
-  margin-bottom: 8px;
-}
-
-.recipe-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.tag {
-  background: rgba(108, 92, 231, 0.12);
-  color: var(--accent-light);
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-size: 0.68rem;
-}
-
-.builtin-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  font-size: 0.62rem;
-  color: var(--text-dim);
-  background: var(--bg-card);
-  padding: 1px 5px;
-  border-radius: 3px;
-  border: 1px solid var(--border);
 }
 
 .empty-recipes {

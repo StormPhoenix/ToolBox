@@ -81,8 +81,9 @@ ToolBox/
 │   │           └── run-script/       # ⚡ 执行 AI 生成脚本（MODERATE）
 │   │   └── persona/                  # Persona Studio（角色工坊）框架（主进程侧）
 │   │       ├── types.ts              # PersonaMeta / Recipe / PersonaEvent / PublishResult 类型
-│   │       ├── recipe-loader.ts      # SKILL.md 格式配方解析（宽容兼容开源格式）
-│   │       ├── recipe-registry.ts    # 配方注册表单例
+│   │       ├── persona-config.ts     # userData/persona-config.json 读写（含 customRecipeDir 解析）
+│   │       ├── recipe-loader.ts      # SKILL.md 格式配方解析（宽容兼容开源格式），用户级目录受配置控制
+│   │       ├── recipe-registry.ts    # 配方注册表单例（支持 replaceAll 热重载）
 │   │       ├── material-collector.ts # URL 抓取（net.fetch + HTML 文本提取）
 │   │       ├── distiller.ts          # 两阶段蒸馏编排（B-1 并行提取 + B-2 流式合成，全程支持中止）
 │   │       ├── persona-store.ts      # userData/personas/ 读写 + slugifyName 工具
@@ -122,7 +123,8 @@ ToolBox/
 │       │       ├── PersonaList.vue   # 左栏：按已发布/草稿分组的列表 + 配方目录入口
 │       │       ├── PersonaItem.vue   # 单条目（inline 重命名 + 蒸馏中旋转图标）
 │       │       ├── PersonaDetail.vue # 工作区主体：材料区（Tab 切换 文本/文件/URL）+ SKILL.md 卡片（蒸馏控制 + 编辑器 + 发布按钮）
-│       │       └── RecipePickerModal.vue # 配方卡片选择器（新建人格 / 切换配方共用）
+│       │       ├── RecipePickerModal.vue # 配方卡片选择器（新建人格 / 切换配方共用）
+│       │       └── RecipeCard.vue    # 配方卡片子组件（PickerModal + Settings 列表共用，含内置/外置徽标）
 │       ├── composables/
 │       │   ├── usePlugins.ts         # 插件注册表状态管理 composable
 │       │   └── useChat.ts            # Chat 状态 + IPC + chat:event 订阅（单例）
@@ -321,8 +323,12 @@ Skill 是为 LLM Chat 对话提供**工具调用能力**的声明式扩展机制
 | `personaDelete(id)` | `persona:delete` | 删除 persona（同时撤销发布） |
 | `personaPublish(id, options?)` | `persona:publish` | 发布 SKILL.md → `userData/skills/<slug>/`（slug = slugify(persona.name)）。返回 `PersonaPublishResult`：成功 → `{ok:true, publishedDir}`；跨 persona 冲突 → `{ok:false, reason:'directory_taken', dir, slug}`，前端弹确认后传 `{overwrite:true}` 强制覆盖；SKILL.md 为空 → `{ok:false, reason:'no_skill_md'}` |
 | `personaUnpublish(id)` | `persona:unpublish` | 撤销发布（按 meta.published_dir 删除，缺失时 fallback 用 persona id），status → draft |
-| `personaOpenRecipeDir()` | `persona:open-recipe-dir` | 在 Finder 打开用户配方目录 `userData/persona-recipes/`（不存在时自动创建） |
+| `personaOpenRecipeDir()` | `persona:open-recipe-dir` | 在 Finder 打开当前生效的用户配方目录（默认 `userData/persona-recipes/`，或用户在 Settings 中自定义的路径）；不存在时自动创建 |
 | `personaOpenDir(id, target?)` | `persona:open-dir` | 在 Finder 打开 Persona 相关目录：`target='persona'` → `userData/personas/<id>/`，`target='published'` → `userData/skills/<published_dir>/` |
+| `personaOpenBaseDir(which)` | `persona:open-base-dir` | 在 Finder 打开根目录：`which='personas'` / `'skills'` / `'recipes'`（recipes 自动按当前配置定位，不存在时自动创建） |
+| `personaGetConfig()` | `persona:get-config` | 读取 Persona 配置（含 `customRecipeDir` / `defaultRecipeDir` / `effectiveRecipeDir`） |
+| `personaSetConfig(config)` | `persona:set-config` | 更新 Persona 配置（仅 `customRecipeDir`：`null` 恢复默认，非空字符串切换到自定义路径），自动重新加载配方注册表 + 自动创建目录 |
+| `personaReloadRecipes()` | `persona:reload-recipes` | 强制重新扫描所有配方目录刷新注册表，返回 `{count}` |
 | `onPersonaEvent(cb)` | `persona:event`（push） | 订阅蒸馏进度事件（`extract-start` / `extract-done` / `synthesis-chunk` / `synthesis-end` / `error` / `aborted`），所有事件携带 `personaId` 字段；返回 dispose 函数 |
 | `debugGetConfig()` | `debug:get-config` | 获取当前调试配置（含 `promptDump.enabled` / `maxFilesPerDay`） |
 | `debugSetConfig(config)` | `debug:set-config` | 更新调试配置（立即生效 + 持久化到 `userData/debug-config.json`） |
@@ -608,4 +614,5 @@ const msg = buildMultiImageMessage(
 - ⚠️ **Persona 配方文件必须解包**：`electron-builder.json5` 的 `asarUnpack` 包含 `dist/main/persona/builtin-recipes/**/*` 和 `dist/main/persona/extraction-prompt.md`，运行时通过 `path.join(__dirname, 'persona', ...)` 读取（recipe-loader 和 distiller 被 Vite 打包进 `dist/main/main-XXX.js`，`__dirname` 解析为 `dist/main/`，需拼上 `persona/` 子目录）
 - ⚠️ **Persona 工作区即时落盘**：所有 Persona 操作（`create` / `add-material` / `remove-material` / `rename` / `set-recipe` / `save-skill-md` / 蒸馏完成）即时写入 `userData/personas/<id>/`，离开页面再返回时状态完整保留；蒸馏在主进程异步进行，关闭工作区视图不会取消，完成后通过 `persona:event` 全局推送，UI 顶层订阅维护活跃指示器
 - ⚠️ **Persona 内部 ID 与发布目录解耦**：内部 Persona 目录名 = `<YYYYMMDD>-<8 位 uuid>`（与展示名解耦，重命名不影响路径）；发布目录名 = `slugify(persona.name)`（保留中文、最长 64 字符），跨 persona 冲突时返回 `directory_taken` 由前端弹确认；meta.json 的 `published_dir` 字段记录当前发布目录名，撤销发布按此精确删除（缺失时 fallback 用 persona id）
+- ⚠️ **用户级配方目录可重定向**：`userData/persona-config.json` 的 `customRecipeDir` 字段控制用户级配方目录的位置——留空时使用默认 `userData/persona-recipes/`，非空时切换到指定绝对路径（替代默认）。Settings 页面"角色工坊"卡片提供 UI；目录变更时 IPC `persona:set-config` 自动 mkdir + 调用 `RecipeRegistry.replaceAll()` 热重载，无需重启。`PersonaList` 底部和 Settings 中的"打开用户配方目录"按钮均自动按当前生效路径定位
 - ⚠️ **LLM `createMessage` 接口已支持 AbortSignal**：第 5 个参数（`signal?: AbortSignal`）可选；三个 Provider（Claude/OpenAI/Gemini）和 DumpingProvider 均透传 signal 到底层 SDK fetch。Persona 蒸馏的 Phase B-1 提取阶段依赖此能力实现立即中止

@@ -7,9 +7,13 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { app } from 'electron';
 import yaml from 'js-yaml';
 import type { Recipe } from './types';
+import {
+  readPersonaConfig,
+  resolveUserRecipesDir,
+  getDefaultUserRecipesDir,
+} from './persona-config';
 import { createLogger } from '../logger';
 
 const log = createLogger('RecipeLoader');
@@ -115,15 +119,25 @@ export function getBuiltinRecipesDir(): string {
   return path.join(__dirname, 'persona', 'builtin-recipes');
 }
 
-/** 用户自定义配方目录（userData/persona-recipes/） */
-export function getUserRecipesDir(): string {
-  return path.join(app.getPath('userData'), 'persona-recipes');
+/**
+ * 当前生效的用户级配方目录（受 persona-config.json 中 customRecipeDir 控制）。
+ *
+ * - 用户已配置自定义路径 → 返回该路径
+ * - 未配置 → 返回默认 userData/persona-recipes/
+ *
+ * 异步从配置读取。同步场景请用 resolveUserRecipesDir(config)。
+ */
+export async function getUserRecipesDir(): Promise<string> {
+  const config = await readPersonaConfig();
+  return resolveUserRecipesDir(config);
 }
 
-/** 加载所有配方（内置 + 用户自定义） */
+export { getDefaultUserRecipesDir };
+
+/** 加载所有配方（内置 + 用户级，用户级目录由配置决定） */
 export async function loadAllRecipes(): Promise<Recipe[]> {
   const builtinDir = getBuiltinRecipesDir();
-  const userDir = getUserRecipesDir();
+  const userDir = await getUserRecipesDir();
 
   const [builtins, userRecipes] = await Promise.all([
     loadRecipesFromDir(builtinDir, true),
@@ -136,6 +150,9 @@ export async function loadAllRecipes(): Promise<Recipe[]> {
   for (const r of userRecipes) map.set(r.name, r);
 
   const result = Array.from(map.values());
-  log.info(`配方加载完成: ${result.length} 个 (内置 ${builtins.length}, 用户 ${userRecipes.length})`);
+  log.info(
+    `配方加载完成: ${result.length} 个 (内置 ${builtins.length}, 用户 ${userRecipes.length}, ` +
+      `用户目录=${userDir})`
+  );
   return result;
 }

@@ -32,4 +32,11 @@ export class RecipeRegistry {
     this.recipes.clear();
     log.info('配方注册表已清空');
   }
+
+  /** 用一组新配方替换整个注册表（用于配置变更后的热重载） */
+  replaceAll(recipes: Recipe[]): void {
+    this.recipes.clear();
+    for (const r of recipes) this.recipes.set(r.name, r);
+    log.info(`配方注册表已重载: ${recipes.length} 个`);
+  }
 }

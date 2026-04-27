@@ -906,6 +906,33 @@ export interface ElectronAPI {
   ): Promise<{ ok: true } | { ok: false; error: string }>;
 
   /**
+   * 在资源管理器中打开 Persona 根目录。
+   * which='personas' → userData/personas/
+   * which='skills'   → userData/skills/
+   * which='recipes'  → 当前生效的用户配方目录（默认或自定义）
+   * 不存在时自动创建。
+   */
+  personaOpenBaseDir(
+    which: 'personas' | 'skills' | 'recipes'
+  ): Promise<{ dir: string }>;
+
+  /** 读取 Persona 配置（含默认目录与当前生效目录路径） */
+  personaGetConfig(): Promise<PersonaConfigPublic>;
+
+  /**
+   * 更新 Persona 配置。
+   * 主进程会立即重新加载配方注册表，并自动创建新指向的目录（若不存在）。
+   * 返回当前生效的配方目录路径。
+   */
+  personaSetConfig(config: PersonaConfig): Promise<{ effectiveRecipeDir: string }>;
+
+  /**
+   * 强制重新扫描所有配方目录刷新注册表。
+   * 通常在 set-config 后由主进程自动触发，但开发期需手动重载也可调用此方法。
+   */
+  personaReloadRecipes(): Promise<{ count: number }>;
+
+  /**
    * 订阅蒸馏进度事件流，返回 dispose 函数。
    * 事件类型见 PersonaEvent，所有事件携带 personaId。
    */
@@ -939,6 +966,25 @@ export interface PersonaRecipeInfo {
   description: string;
   suitable_for?: string[];
   builtin: boolean;
+}
+
+/**
+ * Persona 配置（持久化在 userData/persona-config.json）。
+ *
+ * customRecipeDir：
+ *   - null：使用默认 userData/persona-recipes/
+ *   - 非空字符串：替代默认目录作为用户级配方目录
+ */
+export interface PersonaConfig {
+  customRecipeDir: string | null;
+}
+
+/** persona:get-config 出参（带默认值与当前生效路径） */
+export interface PersonaConfigPublic extends PersonaConfig {
+  /** 应用默认配方目录（不受配置影响，用于 UI 提示） */
+  defaultRecipeDir: string;
+  /** 当前生效的配方目录 */
+  effectiveRecipeDir: string;
 }
 
 /** 材料来源引用（持久化） */

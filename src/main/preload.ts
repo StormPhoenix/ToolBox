@@ -211,6 +211,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   personaOpenDir: (id: string, target?: 'persona' | 'published') =>
     ipcRenderer.invoke('persona:open-dir', id, target ?? 'persona'),
 
+  personaOpenBaseDir: (which: 'personas' | 'skills' | 'recipes') =>
+    ipcRenderer.invoke('persona:open-base-dir', which),
+
+  personaGetConfig: () =>
+    ipcRenderer.invoke('persona:get-config'),
+
+  personaSetConfig: (config: unknown) =>
+    ipcRenderer.invoke('persona:set-config', config),
+
+  personaReloadRecipes: () =>
+    ipcRenderer.invoke('persona:reload-recipes'),
+
   /**
    * 订阅 Persona 蒸馏进度事件流，返回 dispose 函数。
    */

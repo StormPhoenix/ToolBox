@@ -95,7 +95,10 @@ metadata:
 | 来源 | 路径 | 加载时机 |
 |---|---|---|
 | 内置配方 | `src/main/persona/builtin-recipes/<name>/SKILL.md` | 构建时 copy 到 `dist/main/persona/builtin-recipes/`，运行时加载 |
-| 用户自定义 | `userData/persona-recipes/<name>/SKILL.md` | 运行时动态扫描，重启后生效 |
+| 用户级配方（默认） | `userData/persona-recipes/<name>/SKILL.md` | 运行时动态扫描，无配置时使用 |
+| 用户级配方（自定义） | 由 `userData/persona-config.json` 中 `customRecipeDir` 指定的绝对路径 | 在 Settings → 角色工坊中切换；保存后立即重新加载注册表 |
+
+**用户级配方目录是单一目录**（不支持多目录列表）。配置变更时 `RecipeRegistry.replaceAll()` 热重载，无需重启。同名配方按"用户级覆盖内置"规则。
 
 V1 提供 4 个内置配方：
 
@@ -272,15 +275,24 @@ src/main/persona/
 | `personaDistillAbort(requestId)` | `persona:distill-abort` | 中止指定蒸馏 |
 | `personaListActiveDistillations()` | `persona:list-active-distillations` | 返回当前正在进行的 personaId 数组（启动时恢复 UI 指示器） |
 
-### 7.5 发布
+### 7.5 发布与目录
 
 | 方法 | IPC 通道 | 说明 |
 |---|---|---|
 | `personaPublish(id, options?)` | `persona:publish` | 发布 SKILL.md → `userData/skills/<slug>/`；返回结构化结果 `PersonaPublishResult`。冲突场景 D 时返回 `{ok:false, reason:'directory_taken', dir, slug}`，前端弹确认后传 `{overwrite:true}` 强制覆盖；SKILL.md 为空时返回 `{ok:false, reason:'no_skill_md'}` |
 | `personaUnpublish(id)` | `persona:unpublish` | 删除已发布目录（按 meta.published_dir，缺失时 fallback 用 persona id），status → draft |
 | `personaOpenDir(id, target)` | `persona:open-dir` | 在资源管理器中打开 Persona 目录；`target='persona'` → `userData/personas/<id>/`，`target='published'` → `userData/skills/<published_dir>/`；目录不存在时返回 `{ok:false, error}` |
+| `personaOpenBaseDir(which)` | `persona:open-base-dir` | 打开根目录：`'personas'` / `'skills'` / `'recipes'`（`recipes` 按当前 customRecipeDir 配置定位）；不存在时自动创建 |
 
-### 7.6 事件订阅
+### 7.6 配置
+
+| 方法 | IPC 通道 | 说明 |
+|---|---|---|
+| `personaGetConfig()` | `persona:get-config` | 读取配置（含 `customRecipeDir` / `defaultRecipeDir` / `effectiveRecipeDir`） |
+| `personaSetConfig(config)` | `persona:set-config` | 更新配置；保存后自动 mkdir + 重新加载注册表，返回 `{effectiveRecipeDir}` |
+| `personaReloadRecipes()` | `persona:reload-recipes` | 强制重新扫描所有配方目录，返回 `{count}` |
+
+### 7.7 事件订阅
 
 | 方法 | IPC 通道 | 说明 |
 |---|---|---|

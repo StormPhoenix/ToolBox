@@ -275,6 +275,97 @@
         </Transition>
       </section>
 
+      <!-- 角色工坊区块 -->
+      <section class="settings-section">
+        <div class="section-header">
+          <span class="section-icon">🎭</span>
+          <div>
+            <h2 class="section-title">角色工坊</h2>
+            <p class="section-desc">
+              管理蒸馏配方目录与查看本地存储位置。配方目录变更后立即生效。
+            </p>
+          </div>
+        </div>
+
+        <!-- 用户配方目录 -->
+        <div class="field-group">
+          <label class="field-label">用户配方目录</label>
+          <div class="recipe-dir-row">
+            <input
+              class="field-input"
+              type="text"
+              v-model="recipeDirInput"
+              :placeholder="`留空使用默认：${defaultRecipeDir || '...'}`"
+              spellcheck="false"
+              @blur="onRecipeDirBlur"
+              @keydown.enter.prevent="onRecipeDirBlur"
+            />
+            <button
+              class="icon-btn"
+              type="button"
+              title="选择目录"
+              @click="onPickRecipeDir"
+            >
+              📁
+            </button>
+            <button
+              class="icon-btn"
+              type="button"
+              title="恢复默认"
+              :disabled="!recipeDirInput"
+              @click="onResetRecipeDir"
+            >
+              ↺
+            </button>
+          </div>
+          <div class="field-hint">
+            当前生效路径：<code>{{ effectiveRecipeDir || '...' }}</code>
+          </div>
+        </div>
+
+        <!-- 配方卡片列表 -->
+        <div class="recipe-cards-section">
+          <div class="recipe-cards-header">
+            <span>已加载的配方（{{ recipes.length }}）</span>
+            <button class="btn btn--secondary btn--small" type="button" @click="onReloadRecipes">
+              🔄 重新加载
+            </button>
+          </div>
+          <div v-if="recipes.length === 0" class="recipe-cards-empty">
+            暂无配方
+          </div>
+          <div v-else class="recipe-cards-grid">
+            <RecipeCard
+              v-for="r in recipes"
+              :key="r.name"
+              :recipe="r"
+              :selectable="false"
+              :compact="true"
+            />
+          </div>
+        </div>
+
+        <!-- 快捷入口 -->
+        <div class="dir-shortcuts">
+          <button class="btn btn--secondary" type="button" @click="onOpenBaseDir('recipes')">
+            📂 打开当前用户配方目录
+          </button>
+          <button class="btn btn--secondary" type="button" @click="onOpenBaseDir('personas')">
+            📂 打开 Personas 数据目录
+          </button>
+          <button class="btn btn--secondary" type="button" @click="onOpenBaseDir('skills')">
+            📂 打开 Skills 发布目录
+          </button>
+        </div>
+
+        <Transition name="fade">
+          <div v-if="personaToast" class="test-result ok">
+            <span class="test-icon">✓</span>
+            <span>{{ personaToast }}</span>
+          </div>
+        </Transition>
+      </section>
+
       <!-- 开发者调试区块 -->
       <section class="settings-section">
         <div class="section-header">
@@ -338,8 +429,10 @@ import type {
   SkillListItem,
   TrustedToolItem,
   DebugConfigData,
+  PersonaRecipeInfo,
 } from '@toolbox/bridge';
 import { useTheme, type ThemePreference } from '../composables/useTheme';
+import RecipeCard from './persona/RecipeCard.vue';
 
 interface ProviderFormItem {
   apiKey: string;
@@ -644,7 +737,98 @@ onMounted(() => {
   void reloadSkills();
   void reloadTrustedTools();
   void reloadDebugConfig();
+  void reloadPersonaConfig();
+  void reloadRecipes();
 });
+
+// ── 角色工坊（Persona Studio）────────────────────────────────
+
+const recipeDirInput = ref('');
+const defaultRecipeDir = ref('');
+const effectiveRecipeDir = ref('');
+const recipes = ref<PersonaRecipeInfo[]>([]);
+const personaToast = ref<string | null>(null);
+let personaToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function reloadPersonaConfig(): Promise<void> {
+  try {
+    const cfg = await window.electronAPI.personaGetConfig();
+    recipeDirInput.value = cfg.customRecipeDir ?? '';
+    defaultRecipeDir.value = cfg.defaultRecipeDir;
+    effectiveRecipeDir.value = cfg.effectiveRecipeDir;
+  } catch (err) {
+    showPersonaToast(`读取配置失败: ${(err as Error).message}`);
+  }
+}
+
+async function reloadRecipes(): Promise<void> {
+  try {
+    recipes.value = await window.electronAPI.personaListRecipes();
+  } catch {
+    recipes.value = [];
+  }
+}
+
+async function onRecipeDirBlur(): Promise<void> {
+  // 仅在值发生变化时保存（避免每次失焦都触发 IPC）
+  const trimmed = recipeDirInput.value.trim();
+  const current = await window.electronAPI.personaGetConfig();
+  const currentValue = current.customRecipeDir ?? '';
+  if (trimmed === currentValue) return;
+  await saveRecipeDir(trimmed || null);
+}
+
+async function onPickRecipeDir(): Promise<void> {
+  const result = await window.electronAPI.showOpenDialog({
+    title: '选择配方目录',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (result.canceled || result.filePaths.length === 0) return;
+  recipeDirInput.value = result.filePaths[0];
+  await saveRecipeDir(result.filePaths[0]);
+}
+
+async function onResetRecipeDir(): Promise<void> {
+  recipeDirInput.value = '';
+  await saveRecipeDir(null);
+}
+
+async function saveRecipeDir(dir: string | null): Promise<void> {
+  try {
+    const result = await window.electronAPI.personaSetConfig({ customRecipeDir: dir });
+    effectiveRecipeDir.value = result.effectiveRecipeDir;
+    await reloadRecipes();
+    showPersonaToast(dir ? '配方目录已切换' : '已恢复默认配方目录');
+  } catch (err) {
+    showPersonaToast(`保存失败: ${(err as Error).message}`);
+  }
+}
+
+async function onReloadRecipes(): Promise<void> {
+  try {
+    const r = await window.electronAPI.personaReloadRecipes();
+    await reloadRecipes();
+    showPersonaToast(`已重新加载 ${r.count} 个配方`);
+  } catch (err) {
+    showPersonaToast(`重载失败: ${(err as Error).message}`);
+  }
+}
+
+async function onOpenBaseDir(which: 'personas' | 'skills' | 'recipes'): Promise<void> {
+  try {
+    await window.electronAPI.personaOpenBaseDir(which);
+  } catch (err) {
+    showPersonaToast(`打开目录失败: ${(err as Error).message}`);
+  }
+}
+
+function showPersonaToast(msg: string): void {
+  personaToast.value = msg;
+  if (personaToastTimer) clearTimeout(personaToastTimer);
+  personaToastTimer = setTimeout(() => {
+    personaToast.value = null;
+  }, 2200);
+}
 
 // ── 开发者调试 ──────────────────────────────────────────────
 
@@ -1215,6 +1399,93 @@ function showDebugToast(msg: string): void {
   background: var(--bg-card-hover);
   color: var(--danger, #c44);
   border-color: var(--danger, #c44);
+}
+
+/* ── 角色工坊区块 ── */
+.recipe-dir-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.recipe-dir-row .field-input {
+  flex: 1;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 0.82rem;
+}
+
+.recipe-dir-row .icon-btn {
+  flex-shrink: 0;
+  padding: 7px 10px;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.92rem;
+  transition: background var(--transition), border-color var(--transition);
+}
+.recipe-dir-row .icon-btn:hover:not(:disabled) {
+  background: var(--bg-active);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.recipe-dir-row .icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.field-hint {
+  margin-top: 6px;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+}
+.field-hint code {
+  background: var(--bg-base);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.72rem;
+  word-break: break-all;
+}
+
+.recipe-cards-section {
+  margin-top: 18px;
+}
+
+.recipe-cards-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.btn--small {
+  padding: 5px 10px;
+  font-size: 0.78rem;
+}
+
+.recipe-cards-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.84rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.recipe-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.dir-shortcuts {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 /* ── 开发者调试区块 ── */

@@ -35,7 +35,17 @@ import type {
   PersonaEvent,
 } from './types';
 import type { RecipeRegistry } from './recipe-registry';
-import { loadAllRecipes, getUserRecipesDir } from './recipe-loader';
+import {
+  loadAllRecipes,
+  getUserRecipesDir,
+  getDefaultUserRecipesDir,
+} from './recipe-loader';
+import {
+  readPersonaConfig,
+  writePersonaConfig,
+  resolveUserRecipesDir,
+  type PersonaConfig,
+} from './persona-config';
 import { fetchUrlContent } from './material-collector';
 import {
   distill,
@@ -201,13 +211,71 @@ function registerPersonaHandlers(router: LLMRouter, registry: RecipeRegistry): v
 
   // ── persona:open-recipe-dir ───────────────────────────────
   ipcMain.handle('persona:open-recipe-dir', async () => {
-    const recipeDir = getUserRecipesDir();
+    const recipeDir = await getUserRecipesDir();
     if (!existsSync(recipeDir)) {
       mkdirSync(recipeDir, { recursive: true });
     }
     await shell.openPath(recipeDir);
     log.info(`打开配方目录: ${recipeDir}`);
   });
+
+  // ── persona:get-config ────────────────────────────────────
+  ipcMain.handle('persona:get-config', async () => {
+    const config = await readPersonaConfig();
+    return {
+      ...config,
+      defaultRecipeDir: getDefaultUserRecipesDir(),
+      effectiveRecipeDir: resolveUserRecipesDir(config),
+    };
+  });
+
+  // ── persona:set-config ────────────────────────────────────
+  // 保存配置 + 自动重载注册表 + 自动创建目录（如配置了不存在的路径）
+  ipcMain.handle('persona:set-config', async (_e, input: PersonaConfig) => {
+    await writePersonaConfig(input);
+    const newDir = resolveUserRecipesDir(input);
+    if (!existsSync(newDir)) {
+      mkdirSync(newDir, { recursive: true });
+      log.info(`新的用户配方目录已创建: ${newDir}`);
+    }
+    // 立即重新加载注册表
+    if (registryRef) {
+      const recipes = await loadAllRecipes();
+      registryRef.replaceAll(recipes);
+    }
+    return { effectiveRecipeDir: newDir };
+  });
+
+  // ── persona:reload-recipes ────────────────────────────────
+  ipcMain.handle('persona:reload-recipes', async () => {
+    if (!registryRef) return { count: 0 };
+    const recipes = await loadAllRecipes();
+    registryRef.replaceAll(recipes);
+    return { count: recipes.length };
+  });
+
+  // ── persona:open-base-dir ─────────────────────────────────
+  // which: 'personas' | 'skills' | 'recipes'
+  // 'recipes' 自动按当前 config 定位（默认或自定义路径）
+  ipcMain.handle(
+    'persona:open-base-dir',
+    async (_e, which: 'personas' | 'skills' | 'recipes') => {
+      let dir: string;
+      if (which === 'recipes') {
+        dir = await getUserRecipesDir();
+      } else if (which === 'skills') {
+        dir = path.join(app.getPath('userData'), 'skills');
+      } else {
+        dir = path.join(app.getPath('userData'), 'personas');
+      }
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
+      await shell.openPath(dir);
+      log.info(`打开根目录 (${which}): ${dir}`);
+      return { dir };
+    }
+  );
 
   // ── persona:open-dir ──────────────────────────────────────
   // target: 'persona' → 打开 userData/personas/<id>/
