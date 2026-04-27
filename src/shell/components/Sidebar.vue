@@ -21,8 +21,17 @@
       </button>
     </nav>
 
-    <!-- 底部：AI 对话 + 设置 -->
+    <!-- 底部：角色工坊 + AI 对话 + 设置 -->
     <div class="sidebar-footer">
+      <button
+        class="nav-item"
+        :class="{ active: modelValue === 'persona' }"
+        @click="$emit('update:modelValue', 'persona')"
+        :title="collapsed ? '角色工坊' : undefined"
+      >
+        <span class="nav-icon">🎭</span>
+        <span class="nav-label" v-show="!collapsed">角色工坊</span>
+      </button>
       <button
         class="nav-item"
         :class="{ active: modelValue === 'chat' }"

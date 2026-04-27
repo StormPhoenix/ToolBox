@@ -155,4 +155,50 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   debugOpenDumpDir: () =>
     ipcRenderer.invoke('debug:open-dump-dir'),
+
+  // ── Persona Studio ────────────────────────────────────────
+  personaListRecipes: () =>
+    ipcRenderer.invoke('persona:list-recipes'),
+
+  personaFetchUrl: (url: string) =>
+    ipcRenderer.invoke('persona:fetch-url', url),
+
+  personaDistill: (input: unknown) =>
+    ipcRenderer.invoke('persona:distill', input),
+
+  personaDistillAbort: (requestId: string) =>
+    ipcRenderer.invoke('persona:distill-abort', requestId),
+
+  personaSave: (input: unknown) =>
+    ipcRenderer.invoke('persona:save', input),
+
+  personaList: () =>
+    ipcRenderer.invoke('persona:list'),
+
+  personaLoad: (id: string) =>
+    ipcRenderer.invoke('persona:load', id),
+
+  personaDelete: (id: string) =>
+    ipcRenderer.invoke('persona:delete', id),
+
+  personaPublish: (id: string) =>
+    ipcRenderer.invoke('persona:publish', id),
+
+  personaUnpublish: (id: string) =>
+    ipcRenderer.invoke('persona:unpublish', id),
+
+  personaOpenRecipeDir: () =>
+    ipcRenderer.invoke('persona:open-recipe-dir'),
+
+  personaLoadMaterials: (id: string) =>
+    ipcRenderer.invoke('persona:load-materials', id),
+
+  /**
+   * 订阅 Persona 蒸馏进度事件流，返回 dispose 函数。
+   */
+  onPersonaEvent: (callback: (event: unknown) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, event: unknown) => callback(event);
+    ipcRenderer.on('persona:event', listener);
+    return () => ipcRenderer.removeListener('persona:event', listener);
+  },
 });

@@ -818,6 +818,59 @@ export interface ElectronAPI {
 
   /** 在资源管理器中打开 LLM dump 根目录 */
   debugOpenDumpDir(): Promise<void>;
+
+  // ── Persona Studio ────────────────────────────────────────────────────
+
+  /** 列出所有可用配方（内置 + 用户自定义） */
+  personaListRecipes(): Promise<PersonaRecipeInfo[]>;
+
+  /**
+   * 抓取 URL 内容，返回可读文本（材料收集阶段使用）。
+   * ok=true 时 content 有值；ok=false 时 error 描述失败原因。
+   */
+  personaFetchUrl(url: string): Promise<{ ok: true; content: string } | { ok: false; error: string }>;
+
+  /**
+   * 启动蒸馏，立即返回 requestId。
+   * 进度通过 onPersonaEvent 回调推送。
+   */
+  personaDistill(input: PersonaDistillInput): Promise<{ requestId: string }>;
+
+  /** 中止进行中的蒸馏 */
+  personaDistillAbort(requestId: string): Promise<void>;
+
+  /** 保存/更新 persona（Draft 状态） */
+  personaSave(input: PersonaSaveInput): Promise<PersonaMeta>;
+
+  /** 列出所有 persona（PersonaMeta 数组，按 updatedAt 降序） */
+  personaList(): Promise<PersonaMeta[]>;
+
+  /** 加载 persona 详情（meta + SKILL.md 全文），不存在返回 null */
+  personaLoad(id: string): Promise<PersonaLoadResult | null>;
+
+  /** 删除 persona（同时撤销发布） */
+  personaDelete(id: string): Promise<void>;
+
+  /** 发布 persona 为 Skill（复制 SKILL.md 到 userData/skills/） */
+  personaPublish(id: string): Promise<void>;
+
+  /** 撤销发布（删除 userData/skills/<id>/） */
+  personaUnpublish(id: string): Promise<void>;
+
+  /** 在资源管理器中打开用户配方目录 userData/persona-recipes/（不存在时自动创建） */
+  personaOpenRecipeDir(): Promise<void>;
+
+  /**
+   * 读取 persona 已存档的材料内容（用于重新蒸馏）。
+   * 返回与 persona.sources 一一对应的字符串数组，文件缺失时对应项为空字符串。
+   */
+  personaLoadMaterials(id: string): Promise<string[]>;
+
+  /**
+   * 订阅蒸馏进度事件流，返回 dispose 函数。
+   * 事件类型见 PersonaEvent。
+   */
+  onPersonaEvent(callback: (event: PersonaEvent) => void): () => void;
 }
 
 // ── Skill 类型 ────────────────────────────────────────────────────────────
@@ -838,6 +891,73 @@ export interface TrustedToolItem {
   displayName: string;
   skillName: string;
 }
+
+// ── Persona Studio 类型 ───────────────────────────────────────────────────
+
+/** 配方信息（UI 列表展示用） */
+export interface PersonaRecipeInfo {
+  name: string;
+  description: string;
+  suitable_for?: string[];
+  builtin: boolean;
+}
+
+/** 材料来源引用（持久化） */
+export interface PersonaSourceRef {
+  type: 'text' | 'file' | 'url';
+  /** 展示标签 */
+  label: string;
+  /** materials/ 目录下的文件名 */
+  stored_as: string;
+}
+
+/** Persona 产物元数据 */
+export interface PersonaMeta {
+  id: string;
+  name: string;
+  recipe_name: string;
+  status: 'draft' | 'published';
+  created: string;
+  updated: string;
+  sources: PersonaSourceRef[];
+}
+
+/** 单份输入材料（传输用，含内容） */
+export interface PersonaMaterialInput {
+  type: 'text' | 'file' | 'url';
+  label: string;
+  content: string;
+}
+
+/** persona:distill 入参 */
+export interface PersonaDistillInput {
+  recipe_name: string;
+  materials: PersonaMaterialInput[];
+}
+
+/** persona:save 入参 */
+export interface PersonaSaveInput {
+  id?: string;
+  name: string;
+  recipe_name: string;
+  skillMd: string;
+  sources: PersonaSourceRef[];
+}
+
+/** persona:load 出参 */
+export interface PersonaLoadResult {
+  meta: PersonaMeta;
+  skillMd: string;
+}
+
+/** 蒸馏进度事件 */
+export type PersonaEvent =
+  | { kind: 'extract-start'; requestId: string; sourceIndex: number; total: number }
+  | { kind: 'extract-done'; requestId: string; sourceIndex: number }
+  | { kind: 'synthesis-chunk'; requestId: string; chunk: string }
+  | { kind: 'synthesis-end'; requestId: string }
+  | { kind: 'error'; requestId: string; message: string }
+  | { kind: 'aborted'; requestId: string };
 
 // ── Debug 类型 ────────────────────────────────────────────────────────────
 

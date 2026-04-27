@@ -18,9 +18,11 @@
     "src/renderer/splash.css"
   ],
 
-  // Skill .cjs 脚本必须解包，否则 require() 在 asar 中可能失败
+  // Skill .cjs 脚本 + Persona 配方 .md 文件必须解包，运行时从磁盘 fs.readFile 读取
   "asarUnpack": [
-    "dist/main/skill/builtin-skills/**/*"
+    "dist/main/skill/builtin-skills/**/*",
+    "dist/main/persona/builtin-recipes/**/*",
+    "dist/main/persona/extraction-prompt.md"
   ],
 
   // ── Windows ──────────────────────────────────────────────────────────────

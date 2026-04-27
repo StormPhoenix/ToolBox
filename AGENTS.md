@@ -66,6 +66,21 @@ ToolBox/
 │   │       ├── skill-registry.ts     # 单例注册表 + 执行路由 + 风险判断 + 信任管理
 │   │       ├── skill-config.ts       # userData/skill-config.json 读写（disabled + trustedTools）
 │   │       ├── skill-ipc.ts          # IPC handlers + initializeSkillSystem
+│   │   └── persona/              # Persona Studio（角色工坊）框架（主进程侧）
+│   │       ├── types.ts              # PersonaMeta / Recipe / PersonaEvent 等类型
+│   │       ├── recipe-loader.ts      # SKILL.md 格式配方解析（宽容兼容开源格式）
+│   │       ├── recipe-registry.ts    # 配方注册表单例
+│   │       ├── material-collector.ts # URL 抓取（net.fetch）
+│   │       ├── distiller.ts          # 两阶段蒸馏编排（B-1 并行提取 + B-2 流式合成）
+│   │       ├── persona-store.ts      # userData/personas/ 读写
+│   │       ├── publisher.ts          # 发布：SKILL.md → userData/skills/
+│   │       ├── persona-ipc.ts        # IPC handlers + initializePersonaSystem
+│   │       ├── extraction-prompt.md  # B-1 通用提取 prompt（可直接编辑，无需改代码）
+│   │       └── builtin-recipes/      # 4 个内置配方（构建时由 copy-personas 拷贝到 dist）
+│   │           ├── public-figure/SKILL.md
+│   │           ├── thought-leader/SKILL.md
+│   │           ├── colleague/SKILL.md
+│   │           └── self/SKILL.md
 │   │       └── builtin-skills/       # 12 个内置 Skill（构建时由 copy-skills 拷贝到 dist）
 │   │           ├── web-search/       # 🔍 DuckDuckGo 联网搜索（仅摘要）
 │   │           ├── web-fetch/        # 🌐 抓取 URL 正文供 LLM 阅读/总结
@@ -284,6 +299,19 @@ Skill 是为 LLM Chat 对话提供**工具调用能力**的声明式扩展机制
 | `skillOpenDir()` | `skill:open-dir` | 在资源管理器中打开用户 Skill 目录 `userData/skills/`（不存在时自动创建） |
 | `skillListTrusted()` | `skill:list-trusted` | 获取所有永久信任工具列表（含 toolName / displayName / skillName） |
 | `skillUntrust(toolName)` | `skill:untrust` | 撤销某工具的永久信任，下次调用会重新弹窗 |
+| `personaListRecipes()` | `persona:list-recipes` | 列出所有配方（内置 + 用户自定义 `userData/persona-recipes/`） |
+| `personaFetchUrl(url)` | `persona:fetch-url` | 抓取 URL 返回可读文本，供材料收集阶段使用 |
+| `personaDistill(input)` | `persona:distill` | 启动两阶段蒸馏（B-1 提取 + B-2 合成），立即返回 `{ requestId }`，进度通过 `persona:event` 推送 |
+| `personaDistillAbort(requestId)` | `persona:distill-abort` | 中止进行中的蒸馏 |
+| `personaSave(input)` | `persona:save` | 保存/更新 persona（SKILL.md + meta.json，status: draft） |
+| `personaList()` | `persona:list` | 列出所有 persona（PersonaMeta 数组，按 updatedAt 降序） |
+| `personaLoad(id)` | `persona:load` | 加载 persona 详情（meta + SKILL.md 文本），不存在返回 null |
+| `personaLoadMaterials(id)` | `persona:load-materials` | 读取已存档材料内容数组（用于重新蒸馏） |
+| `personaDelete(id)` | `persona:delete` | 删除 persona（同时撤销发布） |
+| `personaPublish(id)` | `persona:publish` | 发布：复制 SKILL.md → `userData/skills/<id>/`，status → published |
+| `personaUnpublish(id)` | `persona:unpublish` | 撤销发布：删除 `userData/skills/<id>/`，status → draft |
+| `personaOpenRecipeDir()` | `persona:open-recipe-dir` | 在 Finder 打开 `userData/persona-recipes/`（不存在时自动创建） |
+| `onPersonaEvent(cb)` | `persona:event`（push） | 订阅蒸馏进度事件（`extract-start` / `extract-done` / `synthesis-chunk` / `synthesis-end` / `error` / `aborted`），返回 dispose 函数 |
 | `debugGetConfig()` | `debug:get-config` | 获取当前调试配置（含 `promptDump.enabled` / `maxFilesPerDay`） |
 | `debugSetConfig(config)` | `debug:set-config` | 更新调试配置（立即生效 + 持久化到 `userData/debug-config.json`） |
 | `debugOpenDumpDir()` | `debug:open-dump-dir` | 在资源管理器中打开 LLM dump 根目录 `userData/llm-dumps/` |
@@ -309,6 +337,7 @@ Skill 是为 LLM Chat 对话提供**工具调用能力**的声明式扩展机制
 | `pnpm install` | 安装所有依赖（含 workspace 插件） |
 | `pnpm build:main` | Vite 构建主进程 + preload → `dist/main/` |
 | `pnpm build:skills` | 拷贝 `src/main/skill/builtin-skills/` 到 `dist/main/skill/builtin-skills/`（`.cjs` 原样拷贝，不走 Vite 打包） |
+| `pnpm build:personas` | 拷贝 `src/main/persona/builtin-recipes/` 和 `extraction-prompt.md` 到 `dist/main/persona/`（`.md` 文件运行时读取，不走 Vite 打包） |
 | `pnpm build:shell` | Vite 构建 Shell → `dist/shell/` |
 | `pnpm build:plugins` | 构建所有插件 → 各插件 `dist/` |
 | `pnpm build:registry` | 生成 `dist/plugin-registry.json` |
@@ -478,6 +507,7 @@ const msg = buildMultiImageMessage(
 | `docs/tech/llm-debug.md` | 技术 | LLM 调试与 Prompt Dump：文件结构、典型排查场景、安全隐私说明 |
 | `docs/design/backlog.md` | 需求/设计 | 待评估 / 待开发的需求想法积压池（Backlog），按桌面效率 / 学习辅助 / 认知提升分组 |
 | `docs/design/plugin-llm-interface-design.md` | 需求/设计 | 插件 LLM 接口规范：现存问题分析（进程隔离、UI 耦合、能力重叠）与架构方向（插件服务层） |
+| `docs/use/persona-studio.md` | 使用指南 | Persona Studio 使用指南：五步向导操作流程、配方选择与自定义、SKILL.md 配方格式、开源配方导入、extraction-prompt.md 调整、常见问题 |
 | `docs/design/persona-studio-design.md` | 需求/设计 | Persona Studio 设计文档：材料收集 → 多步蒸馏 → 持久化 → 发布为 Skill 的完整生产链路；配方系统（SKILL.md 兼容）、IPC API、Shell UI、构建集成（已立项） |
 | `docs/design/persona-feature-design.md` | 需求/设计 | LLM 思维角色（Persona）Chat 集成规格：工具能力与角色/思维方式解耦、会话级单选注入、与 ChatMode 正交；依赖 Persona Studio 产出的 SKILL.md（待立项） |
 

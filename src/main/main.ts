@@ -8,13 +8,15 @@ import {
   createLogger,
   writeRendererLog,
 } from './logger';
-import { registerLLMHandlers } from './llm/llm-ipc';
+import { registerLLMHandlers, getSharedLLMRouter } from './llm/llm-ipc';
 import { registerImageResizeHandlers } from './image-resize/image-ipc';
 import { registerChatHandlers } from './chat/chat-ipc';
 import { setSharedSkillRegistry } from './chat/chat-engine';
 import { initializePromptDumper } from './llm/prompt-dumper';
 import { SkillRegistry } from './skill/skill-registry';
 import { initializeSkillSystem } from './skill/skill-ipc';
+import { RecipeRegistry } from './persona/recipe-registry';
+import { initializePersonaSystem } from './persona/persona-ipc';
 import {
   registerImageProtocolSchemes,
   registerImageProtocolHandler,
@@ -209,6 +211,14 @@ app.whenReady().then(() => {
   setSharedSkillRegistry(skillRegistry);
   void initializeSkillSystem(skillRegistry).catch((err) =>
     log.warn(`Skill 系统初始化异常: ${(err as Error).message}`)
+  );
+
+  // 初始化 Persona Studio（加载配方 + 注册 IPC）
+  const personaRegistry = new RecipeRegistry();
+  void getSharedLLMRouter().then((router) =>
+    initializePersonaSystem(router, personaRegistry)
+  ).catch((err) =>
+    log.warn(`Persona 系统初始化异常: ${(err as Error).message}`)
   );
 
   // 启动时清理不再被引用的图片缓存（不阻塞启动）

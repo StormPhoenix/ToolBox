@@ -14,6 +14,9 @@
         @open-settings="activeCategoryId = 'settings'"
       />
 
+      <!-- 角色工坊 -->
+      <PersonaStudio v-else-if="activeCategoryId === 'persona'" />
+
       <!-- 设置页 -->
       <Settings v-else-if="activeCategoryId === 'settings'" />
 
@@ -43,6 +46,7 @@ import ToolGrid from './components/ToolGrid.vue';
 import ToolViewer from './components/ToolViewer.vue';
 import Settings from './components/Settings.vue';
 import ChatView from './components/chat/ChatView.vue';
+import PersonaStudio from './components/persona/PersonaStudio.vue';
 import { usePlugins } from './composables/usePlugins';
 import { CATEGORIES } from './data/categories';
 
