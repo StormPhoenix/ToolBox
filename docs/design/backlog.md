@@ -8,8 +8,19 @@
 ## 平台能力
 
 - [ ] **插件 LLM 接口规范** — 制定插件侧向 LLM 暴露工具的接口标准，使插件能声明可被 LLM 调用的能力（类似 Skill 系统，但面向插件生态，扩展 Agent 的桌面工具集）；问题分析见 [`docs/design/plugin-llm-interface-design.md`](plugin-llm-interface-design.md)
-- [ ] **LLM 思维角色（Persona）** — 把「工具能力」与「角色 / 思维方式」解耦为正交两轴：在 `chat` / `agent` / `deep` 任意模式下都允许会话级单选一个纯 prompt Skill 作为当前角色（如「苏格拉底模式」「产品经理模式」「代码评审教练」），独立于工具开关注入到 system prompt；后续可扩展「从材料（文章/书籍/人物描述）自动生成 Persona Skill」的上层工作流。详细需求规格见 [`docs/design/persona-feature-design.md`](persona-feature-design.md)
+- [ ] **LLM 思维角色（Persona）Chat 集成** — Persona Studio（已立项，见 [`docs/design/persona-studio-design.md`](persona-studio-design.md)）发布的 SKILL.md 天然满足 `kind=persona` 派生条件（无工具声明），待本期实现后即可在 Chat 角色选择器中使用：把「工具能力」与「角色 / 思维方式」解耦为正交两轴，在 `chat` / `agent` / `deep` 任意模式下允许会话级单选一个 `kind=persona` 的 Skill 注入到 system prompt，独立于工具开关。详细需求规格见 [`docs/design/persona-feature-design.md`](persona-feature-design.md)
 - [ ] **工具后台静默运行** — Toolbox 工具支持在无前台窗口的情况下持续运行（如定时任务、文件监听、剪贴板监控），不依赖用户打开插件界面
+
+---
+
+## Persona Studio 后续扩展
+
+> Persona Studio 核心功能（材料收集 → 蒸馏 → 持久化 → 发布为 Skill）已立项，见 [`docs/design/persona-studio-design.md`](persona-studio-design.md)。以下为待评估的扩展方向。
+
+- [ ] **配方自定义提取 prompt** — 在 `RECIPE.md` frontmatter 中增加可选字段 `metadata.toolbox.recipe.extraction_prompt`，允许配方作者覆盖全局 `extraction-prompt.md`，适配需要特定提取策略的配方（如专注情感记忆的关系类配方）
+- [ ] **增量补材料** — 对已有 Persona 追加新材料后触发局部重蒸馏，产出 diff 供用户合并到现有 SKILL.md，而非全量重跑
+- [ ] **快照与版本回退** — `userData/personas/<id>/snapshots/` 子目录，每次保存/发布前打快照，支持回退到历史版本
+- [ ] **多输出模式** — 一次蒸馏同时产出 perspective（第三人称分析）和 ask（知识库问答）两种变体 Skill，实现"一份蒸馏，三种消费方式"
 
 ---
 

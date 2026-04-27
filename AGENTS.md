@@ -478,7 +478,8 @@ const msg = buildMultiImageMessage(
 | `docs/tech/llm-debug.md` | 技术 | LLM 调试与 Prompt Dump：文件结构、典型排查场景、安全隐私说明 |
 | `docs/design/backlog.md` | 需求/设计 | 待评估 / 待开发的需求想法积压池（Backlog），按桌面效率 / 学习辅助 / 认知提升分组 |
 | `docs/design/plugin-llm-interface-design.md` | 需求/设计 | 插件 LLM 接口规范：现存问题分析（进程隔离、UI 耦合、能力重叠）与架构方向（插件服务层） |
-| `docs/design/persona-feature-design.md` | 需求/设计 | LLM 思维角色（Persona）需求规格：工具能力与角色/思维方式解耦、会话级单选注入、与 ChatMode 正交（待立项） |
+| `docs/design/persona-studio-design.md` | 需求/设计 | Persona Studio 设计文档：材料收集 → 多步蒸馏 → 持久化 → 发布为 Skill 的完整生产链路；配方系统（SKILL.md 兼容）、IPC API、Shell UI、构建集成（已立项） |
+| `docs/design/persona-feature-design.md` | 需求/设计 | LLM 思维角色（Persona）Chat 集成规格：工具能力与角色/思维方式解耦、会话级单选注入、与 ChatMode 正交；依赖 Persona Studio 产出的 SKILL.md（待立项） |
 
 > 新增文档后请在此表登记。
 
