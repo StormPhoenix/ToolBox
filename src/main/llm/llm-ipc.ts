@@ -143,7 +143,7 @@ export function registerLLMHandlers(): void {
       options?: { system?: string }
     ): Promise<LLMChatResult> => {
       const r = await getRouter();
-      const provider = r.getProvider();
+      const provider = r.getProvider('plugin-llmchat');
       if (!provider) {
         throw new Error('LLM 未配置，请先在设置中填写 API Key 和模型名称');
       }
@@ -154,11 +154,7 @@ export function registerLLMHandlers(): void {
           `provider=${r.getProviderName()}`
       );
 
-      // 设置 scene 上下文后立即调用（withScene 返回 this 以便链式）
-      const response = await r
-        .withScene('plugin-llmchat')
-        .getProvider()!
-        .createMessage(options?.system ?? '', messages);
+      const response = await provider.createMessage(options?.system ?? '', messages);
 
       const text = response.content
         .filter((b): b is import('./types').LLMTextBlock => b.type === 'text')
@@ -244,17 +240,14 @@ export function registerLLMHandlers(): void {
     'llm:test-connection',
     async (): Promise<{ ok: boolean; error?: string }> => {
       const r = await getRouter();
-      const provider = r.getProvider();
+      const provider = r.getProvider('connection-test');
       if (!provider) {
         return { ok: false, error: '未配置 API Key 或模型名称' };
       }
 
       try {
         log.info(`测试连接: ${r.getProviderName()}`);
-        const response = await r
-          .withScene('connection-test')
-          .getProvider()!
-          .createMessage('', [{ role: 'user', content: 'Hi' }]);
+        const response = await provider.createMessage('', [{ role: 'user', content: 'Hi' }]);
         const hasText = response.content.some((b) => b.type === 'text');
         if (!hasText) throw new Error('返回内容为空');
         // 打印返回信息
@@ -274,7 +267,7 @@ export function registerLLMHandlers(): void {
     'llm:generate-image',
     async (_e, options: LLMImageGenOptions): Promise<LLMImageGenResult> => {
       const r = await getRouter();
-      const provider = r.getProvider();
+      const provider = r.getProvider('plugin-image-gen');
       if (!provider) {
         throw new Error('LLM 未配置，请先在设置中填写 API Key 和模型名称');
       }
@@ -291,10 +284,7 @@ export function registerLLMHandlers(): void {
           `provider=${r.getProviderName()}`
       );
 
-      const result = await r
-        .withScene('plugin-image-gen')
-        .getProvider()!
-        .generateImage!(options);
+      const result = await provider.generateImage(options);
 
       log.info(
         `llm:generate-image 完成: images=${result.images.length}, ` +

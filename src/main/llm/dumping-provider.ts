@@ -6,9 +6,8 @@
  *
  * 设计要点：
  *   1. 完全实现 LLMProvider 接口，调用方无感知
- *   2. 通过 scene 上下文（由 Router 注入）区分调用来源
- *   3. scene 上下文使用"单次有效"语义：每次 withScene() 后必须立即调用 Provider
- *   4. dump 写盘 fire-and-forget，不影响主流程时序
+ *   2. 通过 scene 上下文（构造时绑定）区分调用来源，每次调用隔离，天然并发安全
+ *   3. dump 写盘 fire-and-forget，不影响主流程时序
  */
 import type {
   LLMProvider,
@@ -23,7 +22,7 @@ import type {
 import { dumpCall, type DumpRecord } from './prompt-dumper';
 
 /**
- * 调用场景上下文，由 Router.withScene() 设置，代理读取后立即清空。
+ * 调用场景上下文，在 Router.getProvider(scene, opts) 时绑定到实例。
  */
 export interface CallSceneContext {
   scene: string;
@@ -35,15 +34,14 @@ export interface CallSceneContext {
 /**
  * Provider 代理。
  *
- * 内部通过 getPendingScene()（由 Router 注入）获取当前调用的 scene 上下文。
- * 若未设置 scene，使用默认值 'unknown'。
+ * scene 上下文在构造时绑定，每次 Router.getProvider() 调用返回独立实例，
+ * 并发调用之间互不干扰。
  */
 export class DumpingProvider implements LLMProvider {
   constructor(
     private readonly inner: LLMProvider,
     private readonly getProviderName: () => string,
-    /** Router 提供的"消费一次"的上下文获取函数 */
-    private readonly consumeScene: () => CallSceneContext
+    private readonly ctx: CallSceneContext = { scene: 'unknown' }
   ) {}
 
   get model(): string {
@@ -60,7 +58,7 @@ export class DumpingProvider implements LLMProvider {
     tools?: LLMToolDef[],
     toolChoice?: LLMToolChoice
   ): Promise<LLMResponse> {
-    const ctx = this.consumeScene();
+    const ctx = this.ctx;
     const startedAt = Date.now();
     const timestamp = new Date(startedAt).toISOString();
 
@@ -104,7 +102,7 @@ export class DumpingProvider implements LLMProvider {
     tools?: LLMToolDef[],
     toolChoice?: LLMToolChoice
   ): Promise<LLMResponse> {
-    const ctx = this.consumeScene();
+    const ctx = this.ctx;
     const startedAt = Date.now();
     const timestamp = new Date(startedAt).toISOString();
 
@@ -148,7 +146,7 @@ export class DumpingProvider implements LLMProvider {
     if (!this.inner.generateImage) {
       throw new Error('Provider 未实现图像生成');
     }
-    const ctx = this.consumeScene();
+    const ctx = this.ctx;
     const startedAt = Date.now();
     const timestamp = new Date(startedAt).toISOString();
 

@@ -648,9 +648,8 @@ async function runStream(params: {
   const runStartMs = Date.now();
 
   const router = await getSharedLLMRouter();
-  const provider = router.getProvider();
 
-  if (!provider) {
+  if (!router.isAvailable()) {
     onEvent({
       kind: 'error',
       requestId,
@@ -742,10 +741,9 @@ async function runStream(params: {
           (isLastIter ? ' [last-iter:hint-injected]' : '')
       );
 
-      // 为本次调用设置 scene 上下文（Router 代理会自动 dump 请求/响应到磁盘）
-      router.withScene('main-chat', { requestId, sessionId, iteration: iter });
+      const iterProvider = router.getProvider('main-chat', { requestId, sessionId, iteration: iter })!;
 
-      const response = await provider.streamMessage(
+      const response = await iterProvider.streamMessage(
         currentSystemParam,
         llmMessages,
         (delta) => {
