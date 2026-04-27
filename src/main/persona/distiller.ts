@@ -35,7 +35,8 @@ let cachedExtractionPrompt: string | null = null;
 
 function loadExtractionPrompt(): string {
   if (cachedExtractionPrompt !== null) return cachedExtractionPrompt;
-  const promptPath = path.join(__dirname, 'extraction-prompt.md');
+  // 与 recipe-loader 同：__dirname = dist/main/，需拼上 'persona' 子目录
+  const promptPath = path.join(__dirname, 'persona', 'extraction-prompt.md');
   try {
     cachedExtractionPrompt = fs.readFileSync(promptPath, 'utf-8').trim();
     return cachedExtractionPrompt;

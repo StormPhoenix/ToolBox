@@ -105,9 +105,14 @@ async function loadRecipesFromDir(dir: string, builtin: boolean): Promise<Recipe
 
 // ─── 公开 API ────────────────────────────────────────────────
 
-/** 内置配方目录（dist/main/persona/builtin-recipes/） */
+/**
+ * 内置配方目录（dist/main/persona/builtin-recipes/）。
+ *
+ * 注意：本模块被 Vite 打包进 dist/main/main-XXX.js，运行时 __dirname = dist/main/，
+ * 因此需要拼上 'persona' 子目录才能匹配 copy-personas.mjs 的拷贝目标。
+ */
 export function getBuiltinRecipesDir(): string {
-  return path.join(__dirname, 'builtin-recipes');
+  return path.join(__dirname, 'persona', 'builtin-recipes');
 }
 
 /** 用户自定义配方目录（userData/persona-recipes/） */
