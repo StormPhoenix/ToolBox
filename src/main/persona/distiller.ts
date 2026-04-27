@@ -6,16 +6,19 @@
  * Phase B-2：把所有摘要合并，用配方 body 作为 system prompt 调用 LLM（流式），
  *            产出完整的 SKILL.md 草稿。
  *
- * 蒸馏状态机：
- *   - 每次 distill() 分配一个 requestId
- *   - 进度通过 broadcastEvent 回调推送给 persona-ipc
- *   - 支持 abort(requestId) 中止
+ * 工作区模型下：
+ *   - 入参只有 personaId；材料和配方由主进程从磁盘读
+ *   - 完成后自动把结果写入 userData/personas/<id>/SKILL.md
+ *   - 事件携带 personaId，UI 可全局订阅按 id 路由
+ *   - getActiveDistillations() 返回所有"正在进行中"的 personaId 集合
  */
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import type { LLMRouter } from '../llm/router';
-import type { PersonaDistillInput, PersonaEvent } from './types';
+import type { PersonaEvent, PersonaMeta } from './types';
+import type { Recipe } from './types';
+import { loadMaterialContents, loadPersona, saveSkillMd } from './persona-store';
 import { createLogger } from '../logger';
 
 const log = createLogger('Distiller');
@@ -24,10 +27,14 @@ const log = createLogger('Distiller');
 const EXTRACT_MAX_TOKENS = 1024;
 /** B-2 合成阶段最大输出 token 数 */
 const SYNTHESIS_MAX_TOKENS = 8192;
-/** 当前 requestId → AbortController */
-const activeRequests = new Map<string, AbortController>();
+
+/** requestId → AbortController */
+const activeByRequestId = new Map<string, AbortController>();
+/** personaId → requestId（最新的），用于 UI 跟踪 */
+const personaToRequest = new Map<string, string>();
 
 export type BroadcastFn = (event: PersonaEvent) => void;
+export type RecipeLookup = (name: string) => Recipe | undefined;
 
 // ─── 提取 prompt 加载 ────────────────────────────────────────
 
@@ -35,7 +42,7 @@ let cachedExtractionPrompt: string | null = null;
 
 function loadExtractionPrompt(): string {
   if (cachedExtractionPrompt !== null) return cachedExtractionPrompt;
-  // 与 recipe-loader 同：__dirname = dist/main/，需拼上 'persona' 子目录
+  // __dirname = dist/main/，需拼上 'persona' 子目录与 copy-personas.mjs 的拷贝目标对齐
   const promptPath = path.join(__dirname, 'persona', 'extraction-prompt.md');
   try {
     cachedExtractionPrompt = fs.readFileSync(promptPath, 'utf-8').trim();
@@ -52,7 +59,7 @@ function loadExtractionPrompt(): string {
   }
 }
 
-/** 重置缓存（开发期修改 extraction-prompt.md 后可调用此函数） */
+/** 重置缓存（开发期修改 extraction-prompt.md 后可调用） */
 export function resetExtractionPromptCache(): void {
   cachedExtractionPrompt = null;
 }
@@ -67,6 +74,8 @@ async function extractSingle(
 ): Promise<string> {
   const provider = router.getProvider('persona-extract', { requestId });
   if (!provider) throw new Error('LLM 未配置');
+
+  if (!material.content.trim()) return '';
 
   const systemPrompt = loadExtractionPrompt();
   const userContent = `材料来源：${material.label}\n\n${material.content}`;
@@ -89,9 +98,10 @@ async function synthesize(
   recipeBody: string,
   extractions: string[],
   requestId: string,
+  personaId: string,
   signal: AbortSignal,
   broadcast: BroadcastFn
-): Promise<void> {
+): Promise<string> {
   const provider = router.getProvider('persona-synthesis', { requestId });
   if (!provider) throw new Error('LLM 未配置');
 
@@ -103,62 +113,97 @@ async function synthesize(
     .map((e, i) => `## 材料摘要 ${i + 1}\n\n${e}`)
     .join('\n\n---\n\n');
 
+  let fullText = '';
   await provider.streamMessage(
     recipeBody,
     [{ role: 'user', content: preamble + extractionText }],
     (chunk) => {
-      broadcast({ kind: 'synthesis-chunk', requestId, chunk });
+      fullText += chunk;
+      broadcast({ kind: 'synthesis-chunk', requestId, personaId, chunk });
     },
     signal
   );
 
-  broadcast({ kind: 'synthesis-end', requestId });
+  return fullText;
 }
 
 // ─── 公开 API ────────────────────────────────────────────────
 
 /**
- * 启动蒸馏流程，立即返回 requestId。
- * 蒸馏异步执行，进度通过 broadcast 推送。
+ * 启动蒸馏流程。
+ * 立即返回 requestId，蒸馏异步执行，完成后自动落盘 SKILL.md。
  */
 export function distill(
   router: LLMRouter,
-  input: PersonaDistillInput,
-  recipeLookup: (name: string) => { body: string } | undefined,
+  personaId: string,
+  recipeLookup: RecipeLookup,
   broadcast: BroadcastFn
 ): string {
   const requestId = randomUUID();
   const controller = new AbortController();
-  activeRequests.set(requestId, controller);
+  activeByRequestId.set(requestId, controller);
+  personaToRequest.set(personaId, requestId);
   const { signal } = controller;
 
   void (async () => {
     try {
-      const recipe = recipeLookup(input.recipe_name);
-      if (!recipe) throw new Error(`未找到配方: ${input.recipe_name}`);
+      // 从磁盘加载最新的 meta + 材料
+      const loaded = await loadPersona(personaId);
+      if (!loaded) throw new Error(`Persona 不存在: ${personaId}`);
+      const meta: PersonaMeta = loaded.meta;
+
+      const recipe = recipeLookup(meta.recipe_name);
+      if (!recipe) throw new Error(`未找到配方: ${meta.recipe_name}`);
+
+      if (meta.sources.length === 0) {
+        throw new Error('没有可用的材料，请先添加至少 1 份材料');
+      }
 
       if (!router.isAvailable()) throw new Error('LLM 未配置，请先在设置中配置 API Key');
 
-      const { materials } = input;
+      const materialContents = await loadMaterialContents(personaId, meta.sources);
+      const materials = meta.sources.map((s, i) => ({
+        label: s.label,
+        content: materialContents[i] ?? '',
+      }));
       const total = materials.length;
 
-      // Phase B-1：并行提取（各材料独立）
+      // Phase B-1：并行提取
       const extractionPromises = materials.map(async (mat, idx) => {
-        broadcast({ kind: 'extract-start', requestId, sourceIndex: idx, total });
+        broadcast({
+          kind: 'extract-start',
+          requestId,
+          personaId,
+          sourceIndex: idx,
+          total,
+        });
         const result = await extractSingle(router, mat, requestId, signal);
-        broadcast({ kind: 'extract-done', requestId, sourceIndex: idx });
+        broadcast({ kind: 'extract-done', requestId, personaId, sourceIndex: idx });
         return result;
       });
 
       const extractions = await Promise.all(extractionPromises);
 
       if (signal.aborted) {
-        broadcast({ kind: 'aborted', requestId });
+        broadcast({ kind: 'aborted', requestId, personaId });
         return;
       }
 
       // Phase B-2：流式合成
-      await synthesize(router, recipe.body, extractions, requestId, signal, broadcast);
+      const skillMd = await synthesize(
+        router,
+        recipe.body,
+        extractions,
+        requestId,
+        personaId,
+        signal,
+        broadcast
+      );
+
+      // 自动落盘 SKILL.md
+      await saveSkillMd(personaId, skillMd);
+
+      broadcast({ kind: 'synthesis-end', requestId, personaId });
     } catch (err) {
       const msg = (err as Error).message ?? String(err);
       if (
@@ -167,13 +212,17 @@ export function distill(
         msg.includes('abort') ||
         (err instanceof DOMException && err.name === 'AbortError')
       ) {
-        broadcast({ kind: 'aborted', requestId });
+        broadcast({ kind: 'aborted', requestId, personaId });
       } else {
-        log.error(`蒸馏失败 [${requestId}]: ${msg}`);
-        broadcast({ kind: 'error', requestId, message: msg });
+        log.error(`蒸馏失败 [${requestId}, persona=${personaId}]: ${msg}`);
+        broadcast({ kind: 'error', requestId, personaId, message: msg });
       }
     } finally {
-      activeRequests.delete(requestId);
+      activeByRequestId.delete(requestId);
+      // 仅当当前 persona 关联的 requestId 仍是这一个时清理
+      if (personaToRequest.get(personaId) === requestId) {
+        personaToRequest.delete(personaId);
+      }
     }
   })();
 
@@ -182,9 +231,20 @@ export function distill(
 
 /** 中止指定蒸馏请求 */
 export function abortDistill(requestId: string): void {
-  const controller = activeRequests.get(requestId);
+  const controller = activeByRequestId.get(requestId);
   if (controller) {
     controller.abort();
     log.info(`蒸馏已中止: ${requestId}`);
   }
+}
+
+/** 中止指定 Persona 当前的蒸馏（若有） */
+export function abortDistillByPersona(personaId: string): void {
+  const requestId = personaToRequest.get(personaId);
+  if (requestId) abortDistill(requestId);
+}
+
+/** 返回所有正在进行中的 personaId 列表 */
+export function getActiveDistillations(): string[] {
+  return Array.from(personaToRequest.keys());
 }

@@ -9,7 +9,7 @@
 
     <div class="list-scroll">
       <div v-if="personas.length === 0" class="empty-hint">
-        暂无人格<br />点击上方按钮开始蒸馏
+        暂无人格<br />点击上方按钮开始
       </div>
 
       <template v-else>
@@ -21,8 +21,10 @@
             :key="p.id"
             :persona="p"
             :active="activeId === p.id"
+            :distilling="activeDistillations.has(p.id)"
             @click="$emit('select', p.id)"
             @delete="$emit('delete', p.id)"
+            @rename="(name: string) => $emit('rename', p.id, name)"
           />
         </div>
 
@@ -34,8 +36,10 @@
             :key="p.id"
             :persona="p"
             :active="activeId === p.id"
+            :distilling="activeDistillations.has(p.id)"
             @click="$emit('select', p.id)"
             @delete="$emit('delete', p.id)"
+            @rename="(name: string) => $emit('rename', p.id, name)"
           />
         </div>
       </template>
@@ -57,12 +61,14 @@ import PersonaItem from './PersonaItem.vue';
 const props = defineProps<{
   personas: PersonaMeta[];
   activeId: string | null;
+  activeDistillations: Set<string>;
 }>();
 
 defineEmits<{
   'new': [];
   'select': [id: string];
   'delete': [id: string];
+  'rename': [id: string, newName: string];
   'open-recipe-dir': [];
 }>();
 

@@ -1,37 +1,57 @@
 /**
- * Persona IPC Handlers
+ * Persona IPC Handlers（工作区模型）
  *
  * 注册以下 IPC 通道：
- *   persona:list-recipes     — 列出所有配方
- *   persona:fetch-url        — 抓取 URL 返回文本（材料收集用）
- *   persona:distill          — 启动蒸馏（异步，事件通过 persona:event 推送）
- *   persona:distill-abort    — 中止蒸馏
- *   persona:save             — 保存/更新 persona（draft）
- *   persona:list             — 列出所有 persona
- *   persona:load             — 加载 persona 详情
- *   persona:delete           — 删除 persona（同时撤销发布）
- *   persona:publish          — 发布为 Skill
- *   persona:unpublish        — 撤销发布
- *   persona:open-recipe-dir  — 在 Finder 打开用户配方目录
+ *   persona:list-recipes              — 列出所有配方
+ *   persona:fetch-url                 — 抓取 URL 返回文本（材料收集用）
+ *   persona:create                    — 创建占位 Persona
+ *   persona:add-material              — 追加单份材料（即时落盘）
+ *   persona:remove-material           — 删除单份材料
+ *   persona:rename                    — 重命名 Persona
+ *   persona:set-recipe                — 切换 Persona 关联的配方
+ *   persona:save-skill-md             — 保存 SKILL.md 文本编辑
+ *   persona:distill                   — 启动蒸馏（异步）
+ *   persona:distill-abort             — 中止蒸馏
+ *   persona:list-active-distillations — 返回当前正在蒸馏的 personaId 列表
+ *   persona:list                      — 列出所有 Persona
+ *   persona:load                      — 加载 Persona 详情
+ *   persona:delete                    — 删除 Persona（同时撤销发布）
+ *   persona:publish                   — 发布为 Skill
+ *   persona:unpublish                 — 撤销发布
+ *   persona:open-recipe-dir           — 在 Finder 打开用户配方目录
  *
  * 事件推送（向所有渲染进程）：
- *   persona:event            — PersonaEvent 联合类型
+ *   persona:event                     — PersonaEvent 联合类型（含 personaId）
  */
 import { ipcMain, webContents, shell, app } from 'electron';
 import * as path from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import type { LLMRouter } from '../llm/router';
-import type { PersonaDistillInput, PersonaEvent, PersonaSaveInput } from './types';
+import type {
+  PersonaCreateInput,
+  PersonaAddMaterialInput,
+  PersonaSaveSkillMdInput,
+  PersonaDistillInput,
+  PersonaEvent,
+} from './types';
 import type { RecipeRegistry } from './recipe-registry';
 import { loadAllRecipes, getUserRecipesDir } from './recipe-loader';
 import { fetchUrlContent } from './material-collector';
-import { distill, abortDistill } from './distiller';
 import {
-  savePersona,
+  distill,
+  abortDistill,
+  getActiveDistillations,
+} from './distiller';
+import {
+  createPersona,
+  addMaterial,
+  removeMaterial,
+  renamePersona,
+  setRecipe,
+  saveSkillMd,
   listPersonas,
   loadPersona,
   deletePersona,
-  loadMaterialContents,
 } from './persona-store';
 import { publishPersona, unpublishPersona } from './publisher';
 import { createLogger } from '../logger';
@@ -77,16 +97,56 @@ function registerPersonaHandlers(router: LLMRouter, registry: RecipeRegistry): v
     }
   });
 
+  // ── persona:create ────────────────────────────────────────
+  ipcMain.handle('persona:create', async (_e, input: PersonaCreateInput) => {
+    // 默认配方 = 第一个内置
+    const recipes = registryRef?.listRecipes() ?? [];
+    const fallbackRecipe = recipes.find(r => r.builtin)?.name ?? recipes[0]?.name ?? '';
+    const recipeName = input.recipe_name?.trim() || fallbackRecipe;
+    if (!recipeName) {
+      throw new Error('当前没有可用配方，请先放置或重启应用');
+    }
+    return createPersona(input.name, recipeName);
+  });
+
+  // ── persona:add-material ──────────────────────────────────
+  ipcMain.handle('persona:add-material', async (_e, input: PersonaAddMaterialInput) => {
+    return addMaterial(input.id, input.type, input.label, input.content);
+  });
+
+  // ── persona:remove-material ───────────────────────────────
+  ipcMain.handle(
+    'persona:remove-material',
+    async (_e, id: string, sourceIndex: number) => {
+      return removeMaterial(id, sourceIndex);
+    }
+  );
+
+  // ── persona:rename ────────────────────────────────────────
+  ipcMain.handle('persona:rename', async (_e, id: string, newName: string) => {
+    return renamePersona(id, newName);
+  });
+
+  // ── persona:set-recipe ────────────────────────────────────
+  ipcMain.handle('persona:set-recipe', async (_e, id: string, recipeName: string) => {
+    return setRecipe(id, recipeName);
+  });
+
+  // ── persona:save-skill-md ─────────────────────────────────
+  ipcMain.handle('persona:save-skill-md', async (_e, input: PersonaSaveSkillMdInput) => {
+    return saveSkillMd(input.id, input.skillMd);
+  });
+
   // ── persona:distill ───────────────────────────────────────
   ipcMain.handle('persona:distill', (_e, input: PersonaDistillInput) => {
-    if (!routerRef) return { requestId: null, error: 'LLM 未初始化' };
+    if (!routerRef) return { requestId: '' };
     const requestId = distill(
       routerRef,
-      input,
+      input.id,
       (name) => registryRef?.getRecipe(name),
       broadcastEvent
     );
-    log.info(`蒸馏已启动: ${requestId} (配方: ${input.recipe_name}, 材料: ${input.materials.length})`);
+    log.info(`蒸馏已启动: ${requestId} (persona: ${input.id})`);
     return { requestId };
   });
 
@@ -95,10 +155,9 @@ function registerPersonaHandlers(router: LLMRouter, registry: RecipeRegistry): v
     abortDistill(requestId);
   });
 
-  // ── persona:save ──────────────────────────────────────────
-  ipcMain.handle('persona:save', async (_e, input: PersonaSaveInput) => {
-    const meta = await savePersona(input);
-    return meta;
+  // ── persona:list-active-distillations ─────────────────────
+  ipcMain.handle('persona:list-active-distillations', () => {
+    return getActiveDistillations();
   });
 
   // ── persona:list ──────────────────────────────────────────
@@ -113,7 +172,6 @@ function registerPersonaHandlers(router: LLMRouter, registry: RecipeRegistry): v
 
   // ── persona:delete ────────────────────────────────────────
   ipcMain.handle('persona:delete', async (_e, id: string) => {
-    // 先撤销发布，再删除 persona 目录
     try {
       await unpublishPersona(id);
     } catch {
@@ -131,13 +189,6 @@ function registerPersonaHandlers(router: LLMRouter, registry: RecipeRegistry): v
   // ── persona:unpublish ─────────────────────────────────────
   ipcMain.handle('persona:unpublish', async (_e, id: string) => {
     await unpublishPersona(id);
-  });
-
-  // ── persona:load-materials ────────────────────────────────
-  ipcMain.handle('persona:load-materials', async (_e, id: string) => {
-    const result = await loadPersona(id);
-    if (!result) return [];
-    return loadMaterialContents(id, result.meta.sources);
   });
 
   // ── persona:open-recipe-dir ───────────────────────────────
@@ -169,6 +220,9 @@ export async function initializePersonaSystem(
   }
 
   registerPersonaHandlers(router, registry);
+
+  // app 路径未使用但保留 import 语义清晰
+  void app;
 
   log.info(`Persona 系统初始化完成: ${registry.size} 个配方`);
 }

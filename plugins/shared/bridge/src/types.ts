@@ -831,16 +831,39 @@ export interface ElectronAPI {
   personaFetchUrl(url: string): Promise<{ ok: true; content: string } | { ok: false; error: string }>;
 
   /**
+   * 创建占位 Persona（写 meta.json，不写 SKILL.md）。
+   * 留空 name 时由主进程生成"未命名人格 HH:mm"占位名；
+   * 留空 recipe_name 时使用第一个内置配方。
+   */
+  personaCreate(input: PersonaCreateInput): Promise<PersonaMeta>;
+
+  /** 追加单份材料（即时落盘 + 更新 meta.sources） */
+  personaAddMaterial(input: PersonaAddMaterialInput): Promise<PersonaMeta>;
+
+  /** 删除指定 index 的材料（删文件 + 更新 meta.sources） */
+  personaRemoveMaterial(id: string, sourceIndex: number): Promise<PersonaMeta>;
+
+  /** 重命名 Persona */
+  personaRename(id: string, newName: string): Promise<PersonaMeta>;
+
+  /** 切换 Persona 关联的配方（不影响材料/SKILL.md） */
+  personaSetRecipe(id: string, recipeName: string): Promise<PersonaMeta>;
+
+  /** 保存 SKILL.md 文本编辑（不触发蒸馏） */
+  personaSaveSkillMd(input: PersonaSaveSkillMdInput): Promise<PersonaMeta>;
+
+  /**
    * 启动蒸馏，立即返回 requestId。
-   * 进度通过 onPersonaEvent 回调推送。
+   * 主进程从磁盘读取该 Persona 当前的材料和配方进行蒸馏。
+   * 进度事件通过 onPersonaEvent 推送，完成后自动写入 SKILL.md。
    */
   personaDistill(input: PersonaDistillInput): Promise<{ requestId: string }>;
 
   /** 中止进行中的蒸馏 */
   personaDistillAbort(requestId: string): Promise<void>;
 
-  /** 保存/更新 persona（Draft 状态） */
-  personaSave(input: PersonaSaveInput): Promise<PersonaMeta>;
+  /** 返回当前正在进行中的 personaId 列表（用于 UI 启动时恢复活跃指示器） */
+  personaListActiveDistillations(): Promise<string[]>;
 
   /** 列出所有 persona（PersonaMeta 数组，按 updatedAt 降序） */
   personaList(): Promise<PersonaMeta[]>;
@@ -861,14 +884,8 @@ export interface ElectronAPI {
   personaOpenRecipeDir(): Promise<void>;
 
   /**
-   * 读取 persona 已存档的材料内容（用于重新蒸馏）。
-   * 返回与 persona.sources 一一对应的字符串数组，文件缺失时对应项为空字符串。
-   */
-  personaLoadMaterials(id: string): Promise<string[]>;
-
-  /**
    * 订阅蒸馏进度事件流，返回 dispose 函数。
-   * 事件类型见 PersonaEvent。
+   * 事件类型见 PersonaEvent，所有事件携带 personaId。
    */
   onPersonaEvent(callback: (event: PersonaEvent) => void): () => void;
 }
@@ -922,42 +939,56 @@ export interface PersonaMeta {
   sources: PersonaSourceRef[];
 }
 
-/** 单份输入材料（传输用，含内容） */
-export interface PersonaMaterialInput {
+/** persona:create 入参 */
+export interface PersonaCreateInput {
+  /** 留空时主进程生成"未命名人格 HH:mm"占位名 */
+  name?: string;
+  /** 留空时使用第一个内置配方 */
+  recipe_name?: string;
+}
+
+/** persona:add-material 入参 */
+export interface PersonaAddMaterialInput {
+  id: string;
   type: 'text' | 'file' | 'url';
   label: string;
   content: string;
 }
 
-/** persona:distill 入参 */
-export interface PersonaDistillInput {
-  recipe_name: string;
-  materials: PersonaMaterialInput[];
-}
-
-/** persona:save 入参 */
-export interface PersonaSaveInput {
-  id?: string;
-  name: string;
-  recipe_name: string;
+/** persona:save-skill-md 入参 */
+export interface PersonaSaveSkillMdInput {
+  id: string;
   skillMd: string;
-  sources: PersonaSourceRef[];
 }
 
-/** persona:load 出参 */
+/** persona:distill 入参（仅传 id，主进程从磁盘读最新材料和配方） */
+export interface PersonaDistillInput {
+  id: string;
+}
+
+/** persona:load 出参（SKILL.md 文件不存在时为空字符串） */
 export interface PersonaLoadResult {
   meta: PersonaMeta;
   skillMd: string;
 }
 
-/** 蒸馏进度事件 */
+/**
+ * 蒸馏进度事件。
+ * 所有事件携带 personaId，前端可全局订阅按 id 路由。
+ */
 export type PersonaEvent =
-  | { kind: 'extract-start'; requestId: string; sourceIndex: number; total: number }
-  | { kind: 'extract-done'; requestId: string; sourceIndex: number }
-  | { kind: 'synthesis-chunk'; requestId: string; chunk: string }
-  | { kind: 'synthesis-end'; requestId: string }
-  | { kind: 'error'; requestId: string; message: string }
-  | { kind: 'aborted'; requestId: string };
+  | {
+      kind: 'extract-start';
+      requestId: string;
+      personaId: string;
+      sourceIndex: number;
+      total: number;
+    }
+  | { kind: 'extract-done'; requestId: string; personaId: string; sourceIndex: number }
+  | { kind: 'synthesis-chunk'; requestId: string; personaId: string; chunk: string }
+  | { kind: 'synthesis-end'; requestId: string; personaId: string }
+  | { kind: 'error'; requestId: string; personaId: string; message: string }
+  | { kind: 'aborted'; requestId: string; personaId: string };
 
 // ── Debug 类型 ────────────────────────────────────────────────────────────
 

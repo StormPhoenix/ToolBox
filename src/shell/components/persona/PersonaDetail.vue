@@ -3,160 +3,456 @@
     <!-- 头部 -->
     <div class="detail-header">
       <div class="header-left">
-        <div class="persona-name">{{ persona.name }}</div>
+        <div class="persona-name" :title="persona.name">{{ persona.name }}</div>
         <div class="persona-meta">
           <span class="status-badge" :class="persona.status">
             {{ persona.status === 'published' ? '已发布' : '草稿' }}
           </span>
           <span class="meta-sep">·</span>
-          <span class="recipe-tag">{{ persona.recipe_name }}</span>
-          <span class="meta-sep">·</span>
-          <span class="meta-date">{{ persona.sources.length }} 份材料 · {{ formatDate(persona.updated) }}</span>
+          <span class="meta-date">更新于 {{ formatDate(persona.updated) }}</span>
         </div>
       </div>
       <div class="header-actions">
         <button
-          class="action-btn"
+          class="recipe-btn"
           type="button"
-          title="重新蒸馏（使用当前材料和配方）"
-          :disabled="redistilling"
-          @click="redistill"
+          :disabled="recipeChanging"
+          :title="recipeKnown ? '点击切换配方' : '当前配方不存在，点击重新选择'"
+          @click="showRecipeModal = true"
         >
-          {{ redistilling ? '蒸馏中…' : '🔄 重新蒸馏' }}
-        </button>
-        <button
-          v-if="persona.status === 'draft'"
-          class="action-btn primary"
-          type="button"
-          :disabled="publishing"
-          @click="publish"
-        >
-          {{ publishing ? '发布中…' : '🚀 发布为 Skill' }}
-        </button>
-        <button
-          v-else
-          class="action-btn"
-          type="button"
-          :disabled="publishing"
-          @click="unpublish"
-        >
-          {{ publishing ? '撤销中…' : '↩ 撤销发布' }}
-        </button>
-        <button
-          class="action-btn danger"
-          type="button"
-          @click="deletePersona"
-        >
-          🗑 删除
+          <span class="recipe-icon">🧪</span>
+          <span class="recipe-btn-name">{{ persona.recipe_name }}</span>
+          <span v-if="!recipeKnown" class="recipe-warn">⚠</span>
+          <span class="recipe-caret">▾</span>
         </button>
       </div>
     </div>
 
-    <!-- 重新蒸馏进度（覆盖编辑区） -->
-    <div v-if="redistilling" class="redistill-overlay">
-      <div class="redistill-progress">
-        <div
-          v-for="(s, i) in persona.sources"
-          :key="i"
-          class="extract-item"
-          :class="{
-            done: extractDone.has(i),
-            running: extractRunning.has(i) && !extractDone.has(i),
-          }"
-        >
-          <span class="extract-status">{{ extractDone.has(i) ? '✓' : extractRunning.has(i) ? '⟳' : '·' }}</span>
-          <span>{{ s.label }}</span>
-        </div>
-        <div class="extract-item" :class="{ running: synthesizing }">
-          <span class="extract-status">{{ synthesizing ? '⟳' : '·' }}</span>
-          <span>合成中…</span>
-        </div>
-      </div>
-      <div v-if="streamText" class="redistill-stream">{{ streamText }}</div>
-      <button class="abort-btn" type="button" @click="abortRedistill">中止</button>
-    </div>
+    <div class="detail-body">
 
-    <!-- 编辑区：左编辑器 + 右预览 -->
-    <div v-else class="editor-area">
-      <div class="editor-toolbar">
-        <span class="toolbar-label">SKILL.md</span>
-        <button
-          class="save-btn"
-          type="button"
-          :disabled="!isDirty || saving"
-          @click="saveEdit"
-        >
-          {{ saving ? '保存中…' : isDirty ? '💾 保存修改' : '已保存' }}
+      <!-- 材料区 -->
+      <section class="materials-section">
+        <div class="section-header">
+          <h3>材料 <span class="count">({{ persona.sources.length }})</span></h3>
+        </div>
+
+        <!-- 已有材料列表 -->
+        <div v-if="persona.sources.length > 0" class="material-list">
+          <div v-for="(s, i) in persona.sources" :key="i" class="material-item">
+            <span class="material-type-badge">{{ typeLabel(s.type) }}</span>
+            <span class="material-label" :title="s.label">{{ s.label }}</span>
+            <button
+              class="material-remove"
+              type="button"
+              title="删除材料"
+              @click="removeMaterial(i)"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+        <div v-else class="empty-materials">尚无材料，添加至少 1 份后才能蒸馏</div>
+
+        <!-- 添加材料：文本 -->
+        <div class="add-row">
+          <textarea
+            v-model="textInput"
+            class="text-input"
+            placeholder="粘贴文字片段（可选）…"
+            rows="3"
+            :disabled="addingText"
+          />
+          <button
+            class="add-btn"
+            type="button"
+            :disabled="!textInput.trim() || addingText"
+            @click="addText"
+          >
+            {{ addingText ? '添加中…' : '添加文本' }}
+          </button>
+        </div>
+
+        <!-- 添加材料：文件 + URL -->
+        <div class="add-row inline">
+          <button class="upload-btn" type="button" :disabled="addingFile" @click="pickFile">
+            📂 选择文件
+          </button>
+          <input
+            v-model="urlInput"
+            class="url-input"
+            type="url"
+            placeholder="https://example.com/article"
+            :disabled="fetchingUrl"
+            @keydown.enter.prevent="addUrl"
+          />
+          <button
+            class="add-btn"
+            type="button"
+            :disabled="!urlInput.trim() || fetchingUrl"
+            @click="addUrl"
+          >
+            {{ fetchingUrl ? '抓取中…' : '抓取 URL' }}
+          </button>
+        </div>
+        <div v-if="urlError" class="url-error">{{ urlError }}</div>
+      </section>
+
+      <!-- SKILL.md 区 -->
+      <section class="skill-section">
+        <div class="section-header">
+          <h3>SKILL.md</h3>
+          <div class="section-actions">
+            <!-- 蒸馏控制 -->
+            <button
+              v-if="!isDistilling"
+              class="action-btn small"
+              type="button"
+              :disabled="persona.sources.length === 0"
+              :title="persona.sources.length === 0 ? '请先添加至少 1 份材料' : ''"
+              @click="startDistill"
+            >
+              {{ hasSkillMd ? '🔄 重新蒸馏' : '✨ 开始蒸馏' }}
+            </button>
+            <button
+              v-if="isDistilling"
+              class="action-btn small danger"
+              type="button"
+              @click="abortDistill"
+            >
+              ⏹ 中止
+            </button>
+
+            <!-- 编辑保存 -->
+            <button
+              v-if="!isDistilling && hasSkillMd"
+              class="action-btn small"
+              type="button"
+              :disabled="!isDirty || saving"
+              @click="saveSkillMd"
+            >
+              {{ saving ? '保存中…' : isDirty ? '💾 保存修改' : '已保存' }}
+            </button>
+
+            <!-- 发布 / 撤销发布 -->
+            <button
+              v-if="!isDistilling && hasSkillMd && persona.status === 'draft'"
+              class="action-btn small primary"
+              type="button"
+              :disabled="publishing"
+              @click="publish"
+            >
+              {{ publishing ? '发布中…' : '🚀 发布为 Skill' }}
+            </button>
+            <button
+              v-if="!isDistilling && hasSkillMd && persona.status === 'published'"
+              class="action-btn small"
+              type="button"
+              :disabled="publishing"
+              @click="unpublish"
+            >
+              {{ publishing ? '撤销中…' : '↩ 撤销发布' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 蒸馏进行中：进度展示 -->
+        <div v-if="isDistilling" class="distill-progress">
+          <div
+            v-for="(s, i) in persona.sources"
+            :key="i"
+            class="extract-item"
+            :class="{
+              done: extractDone.has(i),
+              running: extractRunning.has(i) && !extractDone.has(i),
+            }"
+          >
+            <span class="extract-status">
+              {{ extractDone.has(i) ? '✓' : extractRunning.has(i) ? '⟳' : '·' }}
+            </span>
+            <span class="extract-label">{{ s.label }}</span>
+          </div>
+          <div class="extract-item" :class="{ running: synthesizing }">
+            <span class="extract-status">{{ synthesizing ? '⟳' : '·' }}</span>
+            <span class="extract-label">合成中…</span>
+          </div>
+
+          <div v-if="streamText" class="stream-preview">
+            <div class="preview-label">实时预览</div>
+            <div class="preview-content">{{ streamText }}</div>
+          </div>
+        </div>
+
+        <!-- 未蒸馏过：占位 -->
+        <div v-else-if="!hasSkillMd" class="skill-empty">
+          <div class="empty-msg">尚未生成 SKILL.md。添加材料后点击「开始蒸馏」。</div>
+        </div>
+
+        <!-- 已有 SKILL.md：编辑器 + 预览 -->
+        <div v-else class="editor-split">
+          <textarea
+            v-model="localSkillMd"
+            class="md-editor"
+            spellcheck="false"
+          />
+          <div class="md-preview">
+            <MarkdownView :text="localSkillMd" />
+          </div>
+        </div>
+      </section>
+
+      <!-- 危险区 -->
+      <section class="danger-section">
+        <button class="action-btn danger small" type="button" @click="deletePersona">
+          🗑 删除此人格
         </button>
-      </div>
-      <div class="editor-split">
-        <textarea
-          v-model="localSkillMd"
-          class="md-editor"
-          spellcheck="false"
-        />
-        <div class="md-preview">
-          <MarkdownView :text="localSkillMd" />
-        </div>
-      </div>
+      </section>
+
     </div>
 
-    <!-- Toast -->
-    <transition name="toast">
-      <div v-if="toast" class="toast" :class="`toast-${toast.kind}`">
-        {{ toast.text }}
-      </div>
-    </transition>
+    <!-- 切换配方模态 -->
+    <RecipePickerModal
+      v-if="showRecipeModal"
+      :recipes="recipes"
+      :current-recipe="persona.recipe_name"
+      title="切换配方"
+      subtitle="切换不会影响已添加的材料和当前 SKILL.md，下次蒸馏时使用新配方"
+      confirm-label="切换"
+      @select="onRecipeModalSelect"
+      @cancel="showRecipeModal = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue';
-import type { PersonaMeta, PersonaRecipeInfo, PersonaEvent } from '@toolbox/bridge';
+import { ref, computed, watch } from 'vue';
+import type {
+  PersonaMeta,
+  PersonaRecipeInfo,
+  PersonaEvent,
+} from '@toolbox/bridge';
 import MarkdownView from '../chat/MarkdownView.vue';
+import RecipePickerModal from './RecipePickerModal.vue';
 
 const props = defineProps<{
   persona: PersonaMeta;
   skillMd: string;
   recipes: PersonaRecipeInfo[];
+  isDistilling: boolean;
+  /**
+   * 来自父组件的实时事件流（仅当前 persona 的事件）。
+   * 父组件每次插入新事件，本组件 watch 并处理。
+   */
+  liveEvents: PersonaEvent[];
 }>();
 
 const emit = defineEmits<{
-  'update': [meta: PersonaMeta];
-  'deleted': [];
-  'published': [];
-  'unpublished': [];
+  'meta-updated': [meta: PersonaMeta];
+  'skill-md-updated': [content: string];
 }>();
 
-// ── 编辑状态 ──────────────────────────────────────────────
+// ── SKILL.md 编辑状态 ─────────────────────────────────────
 
 const localSkillMd = ref(props.skillMd);
 watch(() => props.skillMd, (v) => { localSkillMd.value = v; });
 
+const hasSkillMd = computed(() => props.skillMd.trim().length > 0);
 const isDirty = computed(() => localSkillMd.value !== props.skillMd);
 const saving = ref(false);
 
-async function saveEdit(): Promise<void> {
+async function saveSkillMd(): Promise<void> {
   if (!isDirty.value) return;
   saving.value = true;
   try {
-    const meta = await window.electronAPI.personaSave({
+    const meta = await window.electronAPI.personaSaveSkillMd({
       id: props.persona.id,
-      name: props.persona.name,
-      recipe_name: props.persona.recipe_name,
       skillMd: localSkillMd.value,
-      sources: props.persona.sources,
     });
-    emit('update', meta);
-    showToast('info', '已保存');
-  } catch (err) {
-    showToast('error', `保存失败：${(err as Error).message}`);
+    emit('meta-updated', meta);
+    emit('skill-md-updated', localSkillMd.value);
   } finally {
     saving.value = false;
   }
 }
 
-// ── 发布 ──────────────────────────────────────────────────
+// ── 材料操作 ─────────────────────────────────────────────
+
+const textInput = ref('');
+const urlInput = ref('');
+const urlError = ref('');
+const addingText = ref(false);
+const addingFile = ref(false);
+const fetchingUrl = ref(false);
+
+function typeLabel(type: string): string {
+  return type === 'text' ? '文本' : type === 'file' ? '文件' : 'URL';
+}
+
+/** 把文本内容截断为不超过 N 字符的单行预览，用作材料 label */
+function truncateLabel(text: string, max = 30): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim();
+  return oneLine.length > max ? oneLine.slice(0, max) + '…' : oneLine;
+}
+
+async function addText(): Promise<void> {
+  const content = textInput.value.trim();
+  if (!content) return;
+  addingText.value = true;
+  try {
+    const meta = await window.electronAPI.personaAddMaterial({
+      id: props.persona.id,
+      type: 'text',
+      label: truncateLabel(content),
+      content,
+    });
+    emit('meta-updated', meta);
+    textInput.value = '';
+  } finally {
+    addingText.value = false;
+  }
+}
+
+async function pickFile(): Promise<void> {
+  const result = await window.electronAPI.showOpenDialog({
+    title: '选择材料文件',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '文本文件', extensions: ['txt', 'md', 'markdown'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) return;
+
+  addingFile.value = true;
+  try {
+    let lastMeta: PersonaMeta | null = null;
+    for (const filePath of result.filePaths) {
+      const content = await window.electronAPI.readFile(filePath);
+      const label = filePath.split(/[\\/]/).pop() ?? filePath;
+      lastMeta = await window.electronAPI.personaAddMaterial({
+        id: props.persona.id,
+        type: 'file',
+        label,
+        content,
+      });
+    }
+    if (lastMeta) emit('meta-updated', lastMeta);
+  } finally {
+    addingFile.value = false;
+  }
+}
+
+async function addUrl(): Promise<void> {
+  const url = urlInput.value.trim();
+  if (!url) return;
+  urlError.value = '';
+  fetchingUrl.value = true;
+  try {
+    const fetchResult = await window.electronAPI.personaFetchUrl(url);
+    if (!fetchResult.ok) {
+      urlError.value = fetchResult.error;
+      return;
+    }
+    const u = new URL(url);
+    const label = `${u.hostname}${u.pathname.slice(0, 30)}`;
+    const meta = await window.electronAPI.personaAddMaterial({
+      id: props.persona.id,
+      type: 'url',
+      label,
+      content: fetchResult.content,
+    });
+    emit('meta-updated', meta);
+    urlInput.value = '';
+  } catch (err) {
+    urlError.value = (err as Error).message;
+  } finally {
+    fetchingUrl.value = false;
+  }
+}
+
+async function removeMaterial(index: number): Promise<void> {
+  const meta = await window.electronAPI.personaRemoveMaterial(props.persona.id, index);
+  emit('meta-updated', meta);
+}
+
+// ── 配方切换 ─────────────────────────────────────────────
+
+const recipeKnown = computed(() =>
+  props.recipes.some(r => r.name === props.persona.recipe_name)
+);
+const recipeChanging = ref(false);
+const showRecipeModal = ref(false);
+
+async function onRecipeModalSelect(newRecipe: string): Promise<void> {
+  showRecipeModal.value = false;
+  if (!newRecipe || newRecipe === props.persona.recipe_name) return;
+  recipeChanging.value = true;
+  try {
+    const meta = await window.electronAPI.personaSetRecipe(props.persona.id, newRecipe);
+    emit('meta-updated', meta);
+  } finally {
+    recipeChanging.value = false;
+  }
+}
+
+// ── 蒸馏控制 ─────────────────────────────────────────────
+
+const extractRunning = ref<Set<number>>(new Set());
+const extractDone = ref<Set<number>>(new Set());
+const synthesizing = ref(false);
+const streamText = ref('');
+let currentRequestId = '';
+
+async function startDistill(): Promise<void> {
+  if (props.persona.sources.length === 0) return;
+  resetDistillState();
+  const result = await window.electronAPI.personaDistill({ id: props.persona.id });
+  currentRequestId = result.requestId;
+}
+
+function abortDistill(): void {
+  if (currentRequestId) {
+    void window.electronAPI.personaDistillAbort(currentRequestId);
+  }
+}
+
+function resetDistillState(): void {
+  extractRunning.value = new Set();
+  extractDone.value = new Set();
+  synthesizing.value = false;
+  streamText.value = '';
+  currentRequestId = '';
+}
+
+// 监听父组件转发的事件
+watch(
+  () => props.liveEvents,
+  (events) => {
+    if (events.length === 0) return;
+    const ev = events[events.length - 1];
+    if (ev.kind === 'extract-start') {
+      extractRunning.value = new Set([...extractRunning.value, ev.sourceIndex]);
+      currentRequestId = ev.requestId;
+    } else if (ev.kind === 'extract-done') {
+      extractDone.value = new Set([...extractDone.value, ev.sourceIndex]);
+      if (extractDone.value.size === props.persona.sources.length) {
+        synthesizing.value = true;
+      }
+    } else if (ev.kind === 'synthesis-chunk') {
+      streamText.value += ev.chunk;
+    } else if (ev.kind === 'synthesis-end' || ev.kind === 'aborted' || ev.kind === 'error') {
+      // 父组件会刷新 SKILL.md 内容；这里只清理本地进度状态
+      resetDistillState();
+    }
+  },
+  { deep: true }
+);
+
+// 切换 persona 时清理本地状态
+watch(() => props.persona.id, () => {
+  resetDistillState();
+});
+
+// ── 发布 ─────────────────────────────────────────────────
 
 const publishing = ref(false);
 
@@ -164,10 +460,9 @@ async function publish(): Promise<void> {
   publishing.value = true;
   try {
     await window.electronAPI.personaPublish(props.persona.id);
-    emit('published');
-    showToast('info', '已发布为 Skill');
-  } catch (err) {
-    showToast('error', `发布失败：${(err as Error).message}`);
+    // 重新加载 meta 以更新 status 徽标
+    const result = await window.electronAPI.personaLoad(props.persona.id);
+    if (result) emit('meta-updated', result.meta);
   } finally {
     publishing.value = false;
   }
@@ -177,120 +472,30 @@ async function unpublish(): Promise<void> {
   publishing.value = true;
   try {
     await window.electronAPI.personaUnpublish(props.persona.id);
-    emit('unpublished');
-    showToast('info', '已撤销发布');
-  } catch (err) {
-    showToast('error', `撤销失败：${(err as Error).message}`);
+    const result = await window.electronAPI.personaLoad(props.persona.id);
+    if (result) emit('meta-updated', result.meta);
   } finally {
     publishing.value = false;
   }
 }
 
-// ── 删除 ──────────────────────────────────────────────────
+// ── 删除 ─────────────────────────────────────────────────
 
 async function deletePersona(): Promise<void> {
   if (!confirm(`确定要删除人格 "${props.persona.name}" 吗？此操作不可撤销。`)) return;
   await window.electronAPI.personaDelete(props.persona.id);
-  emit('deleted');
-}
-
-// ── 重新蒸馏 ──────────────────────────────────────────────
-
-const redistilling = ref(false);
-const extractRunning = ref<Set<number>>(new Set());
-const extractDone = ref<Set<number>>(new Set());
-const synthesizing = ref(false);
-const streamText = ref('');
-let currentRequestId = '';
-let disposeListener: (() => void) | null = null;
-
-async function redistill(): Promise<void> {
-  if (props.persona.sources.length === 0) {
-    showToast('error', '没有可用的材料，无法重新蒸馏');
-    return;
-  }
-
-  redistilling.value = true;
-  extractRunning.value = new Set();
-  extractDone.value = new Set();
-  synthesizing.value = false;
-  streamText.value = '';
-
-  disposeListener = window.electronAPI.onPersonaEvent((event: PersonaEvent) => {
-    if (event.requestId !== currentRequestId) return;
-
-    if (event.kind === 'extract-start') {
-      extractRunning.value = new Set([...extractRunning.value, event.sourceIndex]);
-    } else if (event.kind === 'extract-done') {
-      extractDone.value = new Set([...extractDone.value, event.sourceIndex]);
-      if (extractDone.value.size === props.persona.sources.length) {
-        synthesizing.value = true;
-      }
-    } else if (event.kind === 'synthesis-chunk') {
-      streamText.value += event.chunk;
-    } else if (event.kind === 'synthesis-end') {
-      localSkillMd.value = streamText.value;
-      redistilling.value = false;
-      synthesizing.value = false;
-      showToast('info', '蒸馏完成，请审阅并保存');
-      cleanupListener();
-    } else if (event.kind === 'error') {
-      redistilling.value = false;
-      showToast('error', `蒸馏失败：${event.message}`);
-      cleanupListener();
-    } else if (event.kind === 'aborted') {
-      redistilling.value = false;
-      cleanupListener();
-    }
-  });
-
-  // 需要读取已存档的材料内容
-  const materialContents = await loadMaterialContents();
-  const result = await window.electronAPI.personaDistill({
-    recipe_name: props.persona.recipe_name,
-    materials: props.persona.sources.map((s, i) => ({
-      type: s.type,
-      label: s.label,
-      content: materialContents[i] ?? '',
-    })),
-  });
-  currentRequestId = result.requestId;
-}
-
-async function loadMaterialContents(): Promise<string[]> {
-  return window.electronAPI.personaLoadMaterials(props.persona.id);
-}
-
-function abortRedistill(): void {
-  if (currentRequestId) {
-    void window.electronAPI.personaDistillAbort(currentRequestId);
-  }
-}
-
-function cleanupListener(): void {
-  disposeListener?.();
-  disposeListener = null;
-}
-
-onBeforeUnmount(() => cleanupListener());
-
-// ── Toast ──────────────────────────────────────────────────
-
-interface ToastState { kind: 'info' | 'error'; text: string; }
-const toast = ref<ToastState | null>(null);
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
-
-function showToast(kind: 'info' | 'error', text: string): void {
-  toast.value = { kind, text };
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toast.value = null; }, 2500);
+  // 父组件会监听 personaList 变化自动切回空态
 }
 
 // ── 工具 ──────────────────────────────────────────────────
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  );
 }
 </script>
 
@@ -300,7 +505,6 @@ function formatDate(iso: string): string {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  position: relative;
 }
 
 /* Header */
@@ -351,15 +555,50 @@ function formatDate(iso: string): string {
   color: var(--text-dim);
 }
 
-.recipe-tag {
-  background: rgba(108, 92, 231, 0.15);
-  color: var(--accent-light);
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-size: 0.72rem;
-}
-
 .meta-sep { color: var(--border); }
+
+/* 配方切换按钮（头部右上角） */
+.recipe-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(108, 92, 231, 0.15);
+  border: 1px solid rgba(108, 92, 231, 0.4);
+  border-radius: var(--radius-sm);
+  color: var(--accent-light);
+  cursor: pointer;
+  font-size: 0.84rem;
+  transition: background var(--transition), border-color var(--transition);
+  max-width: 240px;
+}
+.recipe-btn:hover:not(:disabled) {
+  background: rgba(108, 92, 231, 0.25);
+  border-color: var(--accent);
+}
+.recipe-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.recipe-icon {
+  flex-shrink: 0;
+  font-size: 0.95rem;
+}
+.recipe-btn-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.recipe-warn {
+  color: #fbbf24;
+  flex-shrink: 0;
+}
+.recipe-caret {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
 
 .header-actions {
   display: flex;
@@ -401,96 +640,188 @@ function formatDate(iso: string): string {
   border-color: rgba(239, 68, 68, 0.4);
   color: #fca5a5;
 }
-
-/* Editor area */
-.editor-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+.action-btn.small {
+  padding: 5px 10px;
+  font-size: 0.78rem;
 }
 
-.editor-toolbar {
+/* Body */
+.detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-base);
-  flex-shrink: 0;
+  margin-bottom: 12px;
 }
-
-.toolbar-label {
-  font-size: 0.72rem;
-  color: var(--text-dim);
-  font-family: monospace;
-}
-
-.save-btn {
-  padding: 5px 12px;
-  background: var(--accent);
-  border: none;
-  border-radius: var(--radius-sm);
-  color: #fff;
-  cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 500;
-  transition: background var(--transition), opacity var(--transition);
-}
-.save-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-  background: var(--bg-card);
-  color: var(--text-dim);
-}
-.save-btn:hover:not(:disabled) {
-  background: var(--accent-light);
-}
-
-.editor-split {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0;
-  overflow: hidden;
-}
-
-.md-editor {
-  background: var(--bg-base);
-  border: none;
-  border-right: 1px solid var(--border);
+.section-header h3 {
+  font-size: 0.92rem;
   color: var(--text-primary);
-  padding: 16px;
+  margin: 0;
+  font-weight: 600;
+}
+.section-header .count {
+  font-weight: 400;
+  color: var(--text-dim);
   font-size: 0.82rem;
-  font-family: 'Monaco', 'Menlo', monospace;
-  line-height: 1.6;
-  resize: none;
-  outline: none;
+  margin-left: 4px;
 }
-
-.md-preview {
-  padding: 16px 20px;
-  overflow-y: auto;
-  font-size: 0.86rem;
-  line-height: 1.7;
-  color: var(--text-primary);
-  background: var(--bg-content);
-}
-
-/* Redistill overlay */
-.redistill-overlay {
-  flex: 1;
+.section-actions {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 24px;
-  overflow-y: auto;
+  gap: 8px;
 }
 
-.redistill-progress {
+/* Materials */
+.materials-section,
+.skill-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+}
+
+.material-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  margin-bottom: 12px;
+}
+
+.material-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.material-type-badge {
+  font-size: 0.68rem;
+  background: rgba(108, 92, 231, 0.15);
+  color: var(--accent-light);
+  padding: 1px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.material-label {
+  flex: 1;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material-remove {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.95rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  line-height: 1;
+}
+.material-remove:hover {
+  color: #fca5a5;
+}
+
+.empty-materials {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  text-align: center;
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+}
+
+.add-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: flex-start;
+}
+.add-row.inline {
+  align-items: center;
+}
+
+.text-input {
+  flex: 1;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: 8px 10px;
+  font-size: 0.86rem;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+}
+.text-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.url-input {
+  flex: 1;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: 8px 10px;
+  font-size: 0.86rem;
+}
+.url-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.url-error {
+  color: #fca5a5;
+  font-size: 0.78rem;
+  margin-top: -4px;
+}
+
+.upload-btn,
+.add-btn {
+  padding: 8px 14px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.84rem;
+  white-space: nowrap;
+  transition: background var(--transition), border-color var(--transition);
+}
+.upload-btn:hover:not(:disabled),
+.add-btn:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+  border-color: var(--accent);
+}
+.upload-btn:disabled,
+.add-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* SKILL.md */
+.distill-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
 }
 
 .extract-item {
@@ -502,62 +833,92 @@ function formatDate(iso: string): string {
 }
 .extract-item.running { color: var(--accent-light); }
 .extract-item.done { color: var(--text-secondary); }
+
 .extract-status {
   width: 16px;
   text-align: center;
+  font-size: 0.8rem;
 }
 
-.redistill-stream {
-  background: var(--bg-card);
+.stream-preview {
+  margin-top: 10px;
+  background: var(--bg-base);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  overflow: hidden;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.preview-content {
+  flex: 1;
+  overflow-y: auto;
   padding: 12px;
   font-size: 0.8rem;
-  font-family: monospace;
   color: var(--text-secondary);
   white-space: pre-wrap;
-  max-height: 300px;
-  overflow-y: auto;
+  font-family: 'Monaco', 'Menlo', monospace;
   line-height: 1.5;
 }
 
-.abort-btn {
-  align-self: flex-start;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  color: #fca5a5;
-  padding: 7px 16px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 0.84rem;
+.skill-empty {
+  padding: 30px 16px;
+  text-align: center;
+  color: var(--text-dim);
 }
 
-/* Toast */
-.toast {
-  position: absolute;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 8px 18px;
-  border-radius: 20px;
-  background: var(--bg-card);
+.empty-msg {
+  font-size: 0.86rem;
+}
+
+.editor-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
   border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  height: 480px;
+}
+
+.md-editor {
+  background: var(--bg-base);
+  border: none;
+  border-right: 1px solid var(--border);
   color: var(--text-primary);
-  font-size: 0.84rem;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-  z-index: 10;
-  white-space: nowrap;
+  padding: 12px 14px;
+  font-size: 0.82rem;
+  font-family: 'Monaco', 'Menlo', monospace;
+  line-height: 1.6;
+  resize: none;
+  outline: none;
 }
-.toast-error {
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.35);
-  color: #fca5a5;
+.md-editor:focus {
+  background: var(--bg-card);
 }
-.toast-enter-active, .toast-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
+
+.md-preview {
+  padding: 12px 16px;
+  overflow-y: auto;
+  font-size: 0.86rem;
+  line-height: 1.7;
+  color: var(--text-primary);
+  background: var(--bg-content);
 }
-.toast-enter-from, .toast-leave-to {
-  opacity: 0;
-  transform: translate(-50%, 6px);
+
+/* Danger zone */
+.danger-section {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
 }
 </style>

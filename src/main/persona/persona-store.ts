@@ -1,18 +1,31 @@
 /**
  * PersonaStore — userData/personas/ 读写
  *
+ * 工作区模型下的细粒度操作：
+ *   - createPersona       创建占位（写 meta.json，不写 SKILL.md）
+ *   - addMaterial         追加单份材料（即时落盘）
+ *   - removeMaterial      删除单份材料
+ *   - renamePersona       改名
+ *   - setRecipe           切换配方
+ *   - saveSkillMd         保存 SKILL.md 文本编辑
+ *   - updateStatus        发布/撤销发布时切换 status 字段
+ *
  * 目录结构（每个 persona）：
  *   <id>/
  *     meta.json      — PersonaMeta
  *     materials/     — 原始材料文本存档
- *     SKILL.md       — 蒸馏产物（用户编辑后的权威版本）
+ *     SKILL.md       — 蒸馏产物（仅在首次蒸馏后存在）
  */
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import { app } from 'electron';
 import { randomUUID } from 'crypto';
-import type { PersonaMeta, PersonaSaveInput, PersonaLoadResult } from './types';
+import type {
+  PersonaMeta,
+  PersonaSourceRef,
+  PersonaLoadResult,
+} from './types';
 import { createLogger } from '../logger';
 
 const log = createLogger('PersonaStore');
@@ -39,7 +52,7 @@ function materialsDir(id: string): string {
   return path.join(personaDir(id), 'materials');
 }
 
-// ─── ID 生成 ─────────────────────────────────────────────────
+// ─── ID / 文件名生成 ─────────────────────────────────────────
 
 function generateId(name: string): string {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -47,12 +60,37 @@ function generateId(name: string): string {
     .toLowerCase()
     .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 32);
+    .slice(0, 32) || 'persona';
   const uid = randomUUID().slice(0, 8);
   return `${date}-${slug}-${uid}`;
 }
 
-// ─── 读写原语 ────────────────────────────────────────────────
+function defaultPlaceholderName(): string {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `未命名人格 ${hh}:${mm}`;
+}
+
+function pickMaterialFilename(
+  type: 'text' | 'file' | 'url',
+  label: string,
+  existing: PersonaSourceRef[]
+): string {
+  const ext = type === 'url' ? '.md' : '.txt';
+  const used = new Set(existing.map(s => s.stored_as));
+  // 用递增序号避免冲突
+  let n = existing.length;
+  // 防御性循环上限，避免极端情况死循环
+  for (let i = 0; i < 1000; i++) {
+    const candidate = `source-${n}${ext}`;
+    if (!used.has(candidate)) return candidate;
+    n++;
+  }
+  return `source-${randomUUID().slice(0, 8)}${ext}`;
+}
+
+// ─── meta.json 读写 ─────────────────────────────────────────
 
 async function readMeta(id: string): Promise<PersonaMeta> {
   const raw = await fsp.readFile(metaPath(id), 'utf-8');
@@ -65,94 +103,119 @@ async function writeMeta(meta: PersonaMeta): Promise<void> {
   await fsp.writeFile(metaPath(meta.id), JSON.stringify(meta, null, 2), 'utf-8');
 }
 
-async function saveMaterials(id: string, sources: PersonaSaveInput['sources'], materialsMap: Map<string, string>): Promise<void> {
-  const dir = materialsDir(id);
-  await fsp.mkdir(dir, { recursive: true });
-  for (const [filename, content] of materialsMap) {
-    await fsp.writeFile(path.join(dir, filename), content, 'utf-8');
-  }
-  // 删除已不再引用的旧材料文件（仅当目录已存在时）
-  const existing = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
-  const referenced = new Set(sources.map(s => s.stored_as));
-  for (const file of existing) {
-    if (!referenced.has(file)) {
-      await fsp.unlink(path.join(dir, file)).catch(() => undefined);
-    }
-  }
+function touchUpdated(meta: PersonaMeta): void {
+  meta.updated = new Date().toISOString();
 }
 
 // ─── 公开 API ────────────────────────────────────────────────
 
-/** 新建或更新 persona（Draft 状态） */
-export async function savePersona(input: PersonaSaveInput): Promise<PersonaMeta> {
+/** 创建一个空白 Persona 占位（不写 SKILL.md） */
+export async function createPersona(
+  name: string | undefined,
+  recipeName: string
+): Promise<PersonaMeta> {
+  const finalName = (name?.trim()) || defaultPlaceholderName();
   const now = new Date().toISOString();
-  const id = input.id ?? generateId(input.name);
-
-  // 如果是更新，先读取旧 meta 保留 status
-  let existingStatus: PersonaMeta['status'] = 'draft';
-  if (input.id && fs.existsSync(metaPath(input.id))) {
-    try {
-      const old = await readMeta(input.id);
-      existingStatus = old.status;
-    } catch {
-      // 读取失败则视为新建
-    }
-  }
-
-  // 构建 materials 文件名映射（content → stored_as）
-  const materialsMap = new Map<string, string>();
-  const sources = input.sources.map((s, idx) => {
-    const ext = s.type === 'url' ? '.md' : '.txt';
-    const storedAs = s.stored_as || `source-${idx}${ext}`;
-    return { ...s, stored_as: storedAs };
-  });
-
-  // 注意：材料内容由 IPC 层传入时已经分离；store 只负责文件名索引的一致性
-  // 实际材料内容写入由 persona-ipc 调用 saveMaterials 单独处理
+  const id = generateId(finalName);
 
   const meta: PersonaMeta = {
     id,
-    name: input.name,
-    recipe_name: input.recipe_name,
-    status: existingStatus,
-    created: input.id ? (await readMeta(input.id).then(m => m.created).catch(() => now)) : now,
+    name: finalName,
+    recipe_name: recipeName,
+    status: 'draft',
+    created: now,
     updated: now,
-    sources,
+    sources: [],
   };
 
-  const dir = personaDir(id);
-  await fsp.mkdir(dir, { recursive: true });
+  await fsp.mkdir(personaDir(id), { recursive: true });
+  await fsp.mkdir(materialsDir(id), { recursive: true });
   await writeMeta(meta);
-  await fsp.writeFile(skillMdPath(id), input.skillMd, 'utf-8');
 
-  log.info(`Persona 已保存: ${id} (${meta.status})`);
+  log.info(`Persona 已创建: ${id} (${finalName})`);
   return meta;
 }
 
-/** 将材料文本写入 materials/ 目录 */
-export async function saveMaterialFiles(
+/** 追加一份材料（写入文件 + 更新 meta） */
+export async function addMaterial(
   id: string,
-  sources: PersonaSaveInput['sources'],
-  contents: string[]
-): Promise<void> {
-  const dir = materialsDir(id);
-  await fsp.mkdir(dir, { recursive: true });
-  for (let i = 0; i < sources.length; i++) {
-    const s = sources[i];
-    if (s.stored_as && contents[i] !== undefined) {
-      await fsp.writeFile(path.join(dir, s.stored_as), contents[i], 'utf-8');
-    }
-  }
+  type: 'text' | 'file' | 'url',
+  label: string,
+  content: string
+): Promise<PersonaMeta> {
+  const meta = await readMeta(id);
+  const stored_as = pickMaterialFilename(type, label, meta.sources);
+
+  await fsp.mkdir(materialsDir(id), { recursive: true });
+  await fsp.writeFile(path.join(materialsDir(id), stored_as), content, 'utf-8');
+
+  meta.sources.push({ type, label, stored_as });
+  touchUpdated(meta);
+  await writeMeta(meta);
+
+  log.info(`Persona ${id}: 已添加材料 ${stored_as} (${type}, ${content.length} 字符)`);
+  return meta;
 }
 
-/** 加载 persona（meta + SKILL.md 文本） */
+/** 删除指定 index 的材料（删文件 + 更新 meta） */
+export async function removeMaterial(
+  id: string,
+  sourceIndex: number
+): Promise<PersonaMeta> {
+  const meta = await readMeta(id);
+  if (sourceIndex < 0 || sourceIndex >= meta.sources.length) return meta;
+
+  const removed = meta.sources.splice(sourceIndex, 1)[0];
+  await fsp
+    .unlink(path.join(materialsDir(id), removed.stored_as))
+    .catch(() => undefined);
+
+  touchUpdated(meta);
+  await writeMeta(meta);
+
+  log.info(`Persona ${id}: 已删除材料 ${removed.stored_as}`);
+  return meta;
+}
+
+/** 重命名 Persona */
+export async function renamePersona(
+  id: string,
+  newName: string
+): Promise<PersonaMeta> {
+  const meta = await readMeta(id);
+  meta.name = newName.trim() || meta.name;
+  touchUpdated(meta);
+  await writeMeta(meta);
+  return meta;
+}
+
+/** 切换 Persona 关联的配方（不影响材料/SKILL.md） */
+export async function setRecipe(
+  id: string,
+  recipeName: string
+): Promise<PersonaMeta> {
+  const meta = await readMeta(id);
+  meta.recipe_name = recipeName;
+  touchUpdated(meta);
+  await writeMeta(meta);
+  return meta;
+}
+
+/** 保存 SKILL.md 文本编辑（蒸馏完成或用户手动修改后调用） */
+export async function saveSkillMd(id: string, content: string): Promise<PersonaMeta> {
+  const meta = await readMeta(id);
+  await fsp.writeFile(skillMdPath(id), content, 'utf-8');
+  touchUpdated(meta);
+  await writeMeta(meta);
+  return meta;
+}
+
+/** 加载 persona（meta + SKILL.md 文本，文件不存在时返回空字符串） */
 export async function loadPersona(id: string): Promise<PersonaLoadResult | null> {
   if (!fs.existsSync(metaPath(id))) return null;
   try {
-    const [meta, skillMd] = await Promise.all([
-      readMeta(id),
-      fsp.readFile(skillMdPath(id), 'utf-8').catch(() => ''),
-    ]);
+    const meta = await readMeta(id);
+    const skillMd = await fsp.readFile(skillMdPath(id), 'utf-8').catch(() => '');
     return { meta, skillMd };
   } catch (err) {
     log.warn(`加载 Persona 失败: ${id} — ${(err as Error).message}`);
@@ -183,7 +246,7 @@ export async function listPersonas(): Promise<PersonaMeta[]> {
   return metas.sort((a, b) => b.updated.localeCompare(a.updated));
 }
 
-/** 删除 persona 目录（不删除 userData/skills/ 的发布文件，由 publisher 处理） */
+/** 删除 persona 目录（不删除 userData/skills/，由 publisher 处理） */
 export async function deletePersona(id: string): Promise<void> {
   const dir = personaDir(id);
   if (fs.existsSync(dir)) {
@@ -192,14 +255,14 @@ export async function deletePersona(id: string): Promise<void> {
   }
 }
 
-/** 更新 meta.json 的 status 字段 */
+/** 更新 meta.json 的 status 字段（发布/撤销发布用） */
 export async function updatePersonaStatus(
   id: string,
   status: PersonaMeta['status']
 ): Promise<void> {
   const meta = await readMeta(id);
   meta.status = status;
-  meta.updated = new Date().toISOString();
+  touchUpdated(meta);
   await writeMeta(meta);
 }
 
@@ -208,7 +271,7 @@ export async function readSkillMd(id: string): Promise<string> {
   return fsp.readFile(skillMdPath(id), 'utf-8');
 }
 
-/** 读取 materials/ 目录下所有已存档的材料内容 */
+/** 读取 materials/ 目录下所有已存档的材料内容（供 distiller 使用） */
 export async function loadMaterialContents(
   id: string,
   sources: PersonaMeta['sources']

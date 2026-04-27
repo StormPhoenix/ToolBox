@@ -1,15 +1,20 @@
 /**
  * Persona Studio — 核心类型定义
  *
- * PersonaMeta    : 持久化在 userData/personas/<id>/meta.json 的元数据
- * Recipe         : 配方（从 SKILL.md 解析）
- * PersonaMaterial: 单份输入材料（含内容，仅用于传输，不持久化）
- * PersonaEvent   : 主进程向渲染进程推送的蒸馏进度事件
+ * 数据模型：
+ *   PersonaMeta    : 持久化在 userData/personas/<id>/meta.json 的元数据
+ *   Recipe         : 配方（从 SKILL.md 解析）
+ *
+ * 工作区模型（V2）：
+ *   - "+ 新建"立即创建 Persona 占位（写 meta.json，不写 SKILL.md）
+ *   - 添加/删除材料即时落盘
+ *   - 蒸馏发起后由主进程从磁盘读取最新材料和配方
+ *   - 事件包含 personaId，前端可全局订阅展示活跃状态
  */
 
 // ─── 持久化元数据 ───────────────────────────────────────────
 
-/** 单份材料来源描述（持久化）*/
+/** 单份材料来源描述（持久化） */
 export interface PersonaSourceRef {
   type: 'text' | 'file' | 'url';
   /** 展示用标签：文件名、URL 或 "手动输入" */
@@ -34,7 +39,6 @@ export interface PersonaMeta {
 /**
  * 已加载的配方。
  * 配方以 SKILL.md 格式存储；body 即合成阶段的 LLM system prompt。
- * suitable_for 为可选展示提示，来自 metadata.toolbox.recipe.suitable_for。
  */
 export interface Recipe {
   name: string;
@@ -47,54 +51,69 @@ export interface Recipe {
   dirPath: string;
 }
 
-// ─── 蒸馏输入 ───────────────────────────────────────────────
+// ─── IPC 入参 ───────────────────────────────────────────────
 
-/** 单份材料（传输结构，不落盘；落盘由 persona-store 处理） */
-export interface PersonaMaterial {
+/** persona:create 入参 */
+export interface PersonaCreateInput {
+  /** 留空时主进程生成"未命名人格 HH:mm"占位名 */
+  name?: string;
+  /** 留空时使用第一个内置配方 */
+  recipe_name?: string;
+}
+
+/** persona:add-material 入参 */
+export interface PersonaAddMaterialInput {
+  id: string;
   type: 'text' | 'file' | 'url';
-  /** 展示标签 */
   label: string;
-  /** 文本内容（URL 抓取结果由 persona:fetch-url 预取后传入） */
   content: string;
 }
 
-/** persona:distill IPC 入参 */
-export interface PersonaDistillInput {
-  recipe_name: string;
-  materials: PersonaMaterial[];
+/** persona:save-skill-md 入参 */
+export interface PersonaSaveSkillMdInput {
+  id: string;
+  skillMd: string;
 }
 
-/** persona:distill IPC 出参（蒸馏异步执行，进度通过 persona:event 推送） */
+/** persona:distill 入参 */
+export interface PersonaDistillInput {
+  /** 已存在的 Persona id；主进程从磁盘读取最新材料和配方 */
+  id: string;
+}
+
+/** persona:distill 出参 */
 export interface PersonaDistillResult {
   requestId: string;
 }
 
-// ─── 保存/加载 ──────────────────────────────────────────────
-
-/** persona:save IPC 入参 */
-export interface PersonaSaveInput {
-  /** 传入则更新已有 persona，不传则新建 */
-  id?: string;
-  name: string;
-  recipe_name: string;
-  /** SKILL.md 全文（蒸馏产出 + 用户编辑后的内容） */
-  skillMd: string;
-  sources: PersonaSourceRef[];
-}
-
-/** persona:load IPC 出参 */
+/** persona:load 出参 */
 export interface PersonaLoadResult {
   meta: PersonaMeta;
+  /** 文件不存在时为空字符串，前端据此判断"未蒸馏过" */
   skillMd: string;
 }
 
 // ─── 事件 ───────────────────────────────────────────────────
 
-/** 主进程向渲染进程推送的蒸馏进度事件 */
+/**
+ * 主进程向渲染进程推送的蒸馏进度事件。
+ * 所有事件携带 personaId，前端全局订阅按 personaId 路由。
+ */
 export type PersonaEvent =
-  | { kind: 'extract-start'; requestId: string; sourceIndex: number; total: number }
-  | { kind: 'extract-done'; requestId: string; sourceIndex: number }
-  | { kind: 'synthesis-chunk'; requestId: string; chunk: string }
-  | { kind: 'synthesis-end'; requestId: string }
-  | { kind: 'error'; requestId: string; message: string }
-  | { kind: 'aborted'; requestId: string };
+  | {
+      kind: 'extract-start';
+      requestId: string;
+      personaId: string;
+      sourceIndex: number;
+      total: number;
+    }
+  | {
+      kind: 'extract-done';
+      requestId: string;
+      personaId: string;
+      sourceIndex: number;
+    }
+  | { kind: 'synthesis-chunk'; requestId: string; personaId: string; chunk: string }
+  | { kind: 'synthesis-end'; requestId: string; personaId: string }
+  | { kind: 'error'; requestId: string; personaId: string; message: string }
+  | { kind: 'aborted'; requestId: string; personaId: string };

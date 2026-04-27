@@ -156,12 +156,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
   debugOpenDumpDir: () =>
     ipcRenderer.invoke('debug:open-dump-dir'),
 
-  // ── Persona Studio ────────────────────────────────────────
+  // ── Persona Studio（工作区模型） ──────────────────────────
   personaListRecipes: () =>
     ipcRenderer.invoke('persona:list-recipes'),
 
   personaFetchUrl: (url: string) =>
     ipcRenderer.invoke('persona:fetch-url', url),
+
+  personaCreate: (input: unknown) =>
+    ipcRenderer.invoke('persona:create', input),
+
+  personaAddMaterial: (input: unknown) =>
+    ipcRenderer.invoke('persona:add-material', input),
+
+  personaRemoveMaterial: (id: string, sourceIndex: number) =>
+    ipcRenderer.invoke('persona:remove-material', id, sourceIndex),
+
+  personaRename: (id: string, newName: string) =>
+    ipcRenderer.invoke('persona:rename', id, newName),
+
+  personaSetRecipe: (id: string, recipeName: string) =>
+    ipcRenderer.invoke('persona:set-recipe', id, recipeName),
+
+  personaSaveSkillMd: (input: unknown) =>
+    ipcRenderer.invoke('persona:save-skill-md', input),
 
   personaDistill: (input: unknown) =>
     ipcRenderer.invoke('persona:distill', input),
@@ -169,8 +187,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   personaDistillAbort: (requestId: string) =>
     ipcRenderer.invoke('persona:distill-abort', requestId),
 
-  personaSave: (input: unknown) =>
-    ipcRenderer.invoke('persona:save', input),
+  personaListActiveDistillations: () =>
+    ipcRenderer.invoke('persona:list-active-distillations'),
 
   personaList: () =>
     ipcRenderer.invoke('persona:list'),
@@ -189,9 +207,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   personaOpenRecipeDir: () =>
     ipcRenderer.invoke('persona:open-recipe-dir'),
-
-  personaLoadMaterials: (id: string) =>
-    ipcRenderer.invoke('persona:load-materials', id),
 
   /**
    * 订阅 Persona 蒸馏进度事件流，返回 dispose 函数。
