@@ -21,6 +21,16 @@
 - [ ] **增量补材料** — 对已有 Persona 追加新材料后触发局部重蒸馏，产出 diff 供用户合并到现有 SKILL.md，而非全量重跑
 - [ ] **快照与版本回退** — `userData/personas/<id>/snapshots/` 子目录，每次保存/发布前打快照，支持回退到历史版本
 - [ ] **多输出模式** — 一次蒸馏同时产出 perspective（第三人称分析）和 ask（知识库问答）两种变体 Skill，实现"一份蒸馏，三种消费方式"
+- [ ] **agentic 配方运行模式扩展** — 当前 Persona Studio 为"单次离线蒸馏"环境，外部生态中存在大量为 agentic 宿主（Claude Code / OpenClaw / Hermes 等）设计的 Skill 配方（典型案例：[`nvwa-skill`](https://github.com/xmg2024/nvwa-skill)），它们假设具备多轮对话、subagent 派生、文件读写、`WebSearch` / `bash` 等工具调用、用户检查点确认等能力。当前的处理策略与未来扩展方向：
+
+  **当前实现的兜底机制（V1）**：在 `distiller.ts` 的合成阶段注入 `SYNTHESIS_SYSTEM_CONSTRAINT`（追加到配方 system prompt 末尾）+ `SYNTHESIS_USER_CONTRACT`（追加到 user message 末尾）双重约束，强制 LLM 跳过配方中的多步流程指令，直接产出最终 SKILL.md。这是有损方案——agentic 配方设计的 Phase 1.5 / Phase 2.5 等检查点在单次模式下无法触发，蒸馏质量天然受限。
+
+  **当前推荐的用户路径**：对于复杂的 agentic 配方（如 nvwa-skill），建议用户在原宿主（Claude Code 等）执行完整流程，得到成品 SKILL.md，再放入 `userData/skills/<id>/` 目录由 Skill 系统直接加载消费，而非通过 Persona Studio 蒸馏。Persona Studio 主要服务于"单次离线蒸馏配方"（如本项目的 4 个内置配方）。
+
+  **未来扩展方向（V2/V3）**：引入"运行模式"概念，按配方能力需求分级支持：
+    - `single-pass`（V1 已实现）：单次合成，无工具
+    - `tool-aided`（V2）：单 LLM 路径暴露白名单工具——`sandbox_write` / `sandbox_read`（限制在 `userData/personas/<id>/sandbox/` 内）+ `web_fetch`，让配方能补充查证而不威胁本地数据
+    - `agent-loop`（V3）：完整 agent 循环 + 沙盒 + 工具白名单 + 资源限额（最多 N 次工具调用、单次 sandbox 写入大小限制等），类似 Chat 的 deep 模式但严格沙盒化。安全模型需要专门设计：路径越界拒绝、网络白名单、运行时审计、用户确认 UI
 
 ---
 

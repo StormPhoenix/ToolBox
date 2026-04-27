@@ -121,7 +121,12 @@ function subscribeEvents(): void {
       const meta = personas.value.find(p => p.id === event.personaId);
       const name = meta?.name ?? '人格';
       if (event.kind === 'synthesis-end') {
-        showToast('info', `${name} 蒸馏完成`);
+        showToast(
+          event.truncated ? 'error' : 'info',
+          event.truncated
+            ? `${name} 蒸馏完成（输出已截断，请审阅）`
+            : `${name} 蒸馏完成`
+        );
         // 完成后刷新元数据（updated 时间已变）
         void refreshAfterDistill(event.personaId);
       } else if (event.kind === 'error') {

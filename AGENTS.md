@@ -329,7 +329,7 @@ Skill 是为 LLM Chat 对话提供**工具调用能力**的声明式扩展机制
 | `personaGetConfig()` | `persona:get-config` | 读取 Persona 配置（含 `customRecipeDir` / `defaultRecipeDir` / `effectiveRecipeDir`） |
 | `personaSetConfig(config)` | `persona:set-config` | 更新 Persona 配置（仅 `customRecipeDir`：`null` 恢复默认，非空字符串切换到自定义路径），自动重新加载配方注册表 + 自动创建目录 |
 | `personaReloadRecipes()` | `persona:reload-recipes` | 强制重新扫描所有配方目录刷新注册表，返回 `{count}` |
-| `onPersonaEvent(cb)` | `persona:event`（push） | 订阅蒸馏进度事件（`extract-start` / `extract-done` / `synthesis-chunk` / `synthesis-end` / `error` / `aborted`），所有事件携带 `personaId` 字段；返回 dispose 函数 |
+| `onPersonaEvent(cb)` | `persona:event`（push） | 订阅蒸馏进度事件（`extract-start` / `extract-done` / `synthesis-chunk` / `continuation-start` / `synthesis-end` / `error` / `aborted`），所有事件携带 `personaId` 字段。`continuation-start` 用于 max_tokens 截断后的续写阶段（最多 5 轮），`synthesis-end` 携带 `truncated` 字段标识是否达到最大续写轮次仍未结束；返回 dispose 函数 |
 | `debugGetConfig()` | `debug:get-config` | 获取当前调试配置（含 `promptDump.enabled` / `maxFilesPerDay`） |
 | `debugSetConfig(config)` | `debug:set-config` | 更新调试配置（立即生效 + 持久化到 `userData/debug-config.json`） |
 | `debugOpenDumpDir()` | `debug:open-dump-dir` | 在资源管理器中打开 LLM dump 根目录 `userData/llm-dumps/` |
@@ -616,3 +616,5 @@ const msg = buildMultiImageMessage(
 - ⚠️ **Persona 内部 ID 与发布目录解耦**：内部 Persona 目录名 = `<YYYYMMDD>-<8 位 uuid>`（与展示名解耦，重命名不影响路径）；发布目录名 = `slugify(persona.name)`（保留中文、最长 64 字符），跨 persona 冲突时返回 `directory_taken` 由前端弹确认；meta.json 的 `published_dir` 字段记录当前发布目录名，撤销发布按此精确删除（缺失时 fallback 用 persona id）
 - ⚠️ **用户级配方目录可重定向**：`userData/persona-config.json` 的 `customRecipeDir` 字段控制用户级配方目录的位置——留空时使用默认 `userData/persona-recipes/`，非空时切换到指定绝对路径（替代默认）。Settings 页面"角色工坊"卡片提供 UI；目录变更时 IPC `persona:set-config` 自动 mkdir + 调用 `RecipeRegistry.replaceAll()` 热重载，无需重启。`PersonaList` 底部和 Settings 中的"打开用户配方目录"按钮均自动按当前生效路径定位
 - ⚠️ **LLM `createMessage` 接口已支持 AbortSignal**：第 5 个参数（`signal?: AbortSignal`）可选；三个 Provider（Claude/OpenAI/Gemini）和 DumpingProvider 均透传 signal 到底层 SDK fetch。Persona 蒸馏的 Phase B-1 提取阶段依赖此能力实现立即中止
+- ⚠️ **Persona 合成阶段双重锁定 prompt**：`distiller.ts` 顶部声明 `SYNTHESIS_SYSTEM_CONSTRAINT`（追加到配方 system 末尾）+ `SYNTHESIS_USER_CONTRACT`（追加到 user message 末尾），用于覆盖 agentic 配方（如 nvwa-skill）的多步流程指令，迫使 LLM 直接产出最终 SKILL.md 而非过程报告。注意续写循环中只 `messages` 累加 assistant 历史 + `CONTINUATION_PROMPT`，**不重复追加 USER_CONTRACT**（避免干扰续写"接字"语义）。详见 [`docs/design/persona-studio-design.md`](docs/design/persona-studio-design.md) §10.4
+- ⚠️ **Persona 合成阶段 max_tokens 续写**：`distiller.ts` 的 `synthesize()` 是 do-while 循环，最多 5 轮（`MAX_SYNTHESIS_ROUNDS`）。检测到 `stop_reason='max_tokens'` 自动追加 `CONTINUATION_PROMPT` 进入下一轮，每轮通过 `router.getProvider(scene, { requestId, iteration: round })` 让 dump 文件按 iteration 区分（`_iter1.json` / `_iter2.json` / ...）。`synthesis-end` 携带 `truncated` 字段告知 UI 是否达到上限仍未结束

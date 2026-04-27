@@ -216,7 +216,7 @@
           </div>
           <div class="extract-item" :class="{ running: synthesizing }">
             <span class="extract-status">{{ synthesizing ? '⟳' : '·' }}</span>
-            <span class="extract-label">合成中…</span>
+            <span class="extract-label">{{ synthesisLabel }}</span>
           </div>
 
           <div v-if="streamText" class="stream-preview">
@@ -230,15 +230,35 @@
           <div class="empty-msg">尚未生成 SKILL.md。添加材料后点击「开始蒸馏」。</div>
         </div>
 
-        <!-- 已有 SKILL.md：编辑器 + 预览 -->
-        <div v-else class="editor-split">
-          <textarea
-            v-model="localSkillMd"
-            class="md-editor"
-            spellcheck="false"
-          />
-          <div class="md-preview">
-            <MarkdownView :text="localSkillMd" />
+        <!-- 已有 SKILL.md：截断警告（如有）+ 编辑器 + 预览 -->
+        <div v-else class="editor-wrapper">
+          <div v-if="synthesisTruncated" class="truncate-warning">
+            <span class="warn-icon">⚠️</span>
+            <div class="warn-text">
+              <div class="warn-title">输出可能被截断</div>
+              <div class="warn-desc">
+                达到最大续写轮次（5 轮）仍未自然结束，SKILL.md 末尾可能不完整。
+                建议在「设置 → LLM」中调高 maxTokens 后重新蒸馏，或手动补全。
+              </div>
+            </div>
+            <button
+              class="warn-dismiss"
+              type="button"
+              title="忽略此提示"
+              @click="synthesisTruncated = false"
+            >
+              ×
+            </button>
+          </div>
+          <div class="editor-split">
+            <textarea
+              v-model="localSkillMd"
+              class="md-editor"
+              spellcheck="false"
+            />
+            <div class="md-preview">
+              <MarkdownView :text="localSkillMd" />
+            </div>
           </div>
         </div>
       </section>
@@ -453,11 +473,27 @@ const extractRunning = ref<Set<number>>(new Set());
 const extractDone = ref<Set<number>>(new Set());
 const synthesizing = ref(false);
 const streamText = ref('');
+/** 当前续写轮次（0 = 尚未续写或首轮，≥2 = 续写中） */
+const continuationRound = ref(0);
+/** 最大续写轮次（由后端事件携带） */
+const continuationMax = ref(0);
+/** 上一次合成是否因达到最大轮次仍未结束（截断警告） */
+const synthesisTruncated = ref(false);
 let currentRequestId = '';
+
+/** 进度区"合成中…"的展示文案：续写时变为"续写中 X/Y" */
+const synthesisLabel = computed(() => {
+  if (continuationRound.value > 0) {
+    return `续写中 ${continuationRound.value}/${continuationMax.value}`;
+  }
+  return '合成中…';
+});
 
 async function startDistill(): Promise<void> {
   if (props.persona.sources.length === 0) return;
   resetDistillState();
+  // 启动新蒸馏时清除上次的截断警告
+  synthesisTruncated.value = false;
   const result = await window.electronAPI.personaDistill({ id: props.persona.id });
   currentRequestId = result.requestId;
 }
@@ -473,7 +509,11 @@ function resetDistillState(): void {
   extractDone.value = new Set();
   synthesizing.value = false;
   streamText.value = '';
+  continuationRound.value = 0;
+  continuationMax.value = 0;
   currentRequestId = '';
+  // 注意：synthesisTruncated 不在此重置，因为它是"上次蒸馏的结果状态"，
+  // 切换 persona 或重新启动蒸馏时才清除（见 startDistill / persona id watcher）
 }
 
 // 监听父组件转发的事件
@@ -492,17 +532,25 @@ watch(
       }
     } else if (ev.kind === 'synthesis-chunk') {
       streamText.value += ev.chunk;
-    } else if (ev.kind === 'synthesis-end' || ev.kind === 'aborted' || ev.kind === 'error') {
-      // 父组件会刷新 SKILL.md 内容；这里只清理本地进度状态
+    } else if (ev.kind === 'continuation-start') {
+      // LLM 因 max_tokens 截断，进入续写阶段
+      continuationRound.value = ev.round;
+      continuationMax.value = ev.max;
+    } else if (ev.kind === 'synthesis-end') {
+      // 记录是否截断（用于编辑器顶部警告条），其他状态由 resetDistillState 清理
+      synthesisTruncated.value = ev.truncated;
+      resetDistillState();
+    } else if (ev.kind === 'aborted' || ev.kind === 'error') {
       resetDistillState();
     }
   },
   { deep: true }
 );
 
-// 切换 persona 时清理本地状态
+// 切换 persona 时清理本地状态（含上次的截断警告）
 watch(() => props.persona.id, () => {
   resetDistillState();
+  synthesisTruncated.value = false;
 });
 
 // ── 发布 ─────────────────────────────────────────────────
@@ -1055,6 +1103,61 @@ function formatDate(iso: string): string {
 
 .empty-msg {
   font-size: 0.86rem;
+}
+
+.editor-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.truncate-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(239, 191, 68, 0.08);
+  border: 1px solid rgba(239, 191, 68, 0.35);
+  border-radius: var(--radius-sm);
+  color: #fbbf66;
+}
+
+.warn-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.warn-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.warn-title {
+  font-size: 0.84rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.warn-desc {
+  font-size: 0.76rem;
+  color: #d4a44a;
+  line-height: 1.5;
+}
+
+.warn-dismiss {
+  background: none;
+  border: none;
+  color: #d4a44a;
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color var(--transition);
+}
+.warn-dismiss:hover {
+  color: #fbbf66;
 }
 
 .editor-split {

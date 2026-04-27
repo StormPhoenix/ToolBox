@@ -126,6 +126,21 @@ export type PersonaEvent =
       sourceIndex: number;
     }
   | { kind: 'synthesis-chunk'; requestId: string; personaId: string; chunk: string }
-  | { kind: 'synthesis-end'; requestId: string; personaId: string }
+  /**
+   * 上一轮合成因达到 max_tokens 截断，开始续写。
+   * round 为本次进入的轮次（≥2，因为第 1 轮不发此事件），max 为最大允许轮次。
+   */
+  | {
+      kind: 'continuation-start';
+      requestId: string;
+      personaId: string;
+      round: number;
+      max: number;
+    }
+  /**
+   * 合成阶段结束。
+   * truncated=true 表示达到最大续写次数后仍未自然结束（最终输出可能不完整）。
+   */
+  | { kind: 'synthesis-end'; requestId: string; personaId: string; truncated: boolean }
   | { kind: 'error'; requestId: string; personaId: string; message: string }
   | { kind: 'aborted'; requestId: string; personaId: string };

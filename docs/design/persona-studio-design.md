@@ -84,11 +84,7 @@ metadata:
 
 **宽容解析原则**：配方 loader 只要求 `name` 字段和非空 Markdown body；未包含 `metadata.toolbox.type: recipe` 的开源 SKILL.md 放入配方目录后自动视为配方，body 直接作为合成 prompt，用户在 Review 阶段承担输出质量的把关职责。
 
-**配方不约束输出模板**：由配方 body 的 prompt 指导 LLM 如何构建输出 SKILL.md，代码层不注入任何结构约束。合成调用时，仅在 user message 最前附加一行兜底提示：
-
-```
-（以下是材料摘要，请按配方要求进行蒸馏，输出内容将作为 SKILL.md 文件保存，请确保包含合法的 YAML frontmatter。）
-```
+**配方不约束输出模板**：由配方 body 的 prompt 指导 LLM 如何构建输出 SKILL.md，代码层不直接注入结构模板。但合成阶段会在 system 与 user 两端各自注入"运行约束 + 输出契约"双重锁定段，覆盖外部 agentic 配方（如 nvwa-skill）描述的多步流程指令，迫使 LLM 直接产出最终 SKILL.md 而非过程报告。详见 [§10.4 蒸馏鲁棒性](#104-蒸馏鲁棒性)。
 
 ### 3.2 配方目录
 
@@ -305,7 +301,8 @@ src/main/persona/
 | `extract-start` | `{ requestId, personaId, sourceIndex, total }` | 开始提取某份材料 |
 | `extract-done` | `{ requestId, personaId, sourceIndex }` | 某份材料提取完成 |
 | `synthesis-chunk` | `{ requestId, personaId, chunk }` | 合成阶段流式输出片段 |
-| `synthesis-end` | `{ requestId, personaId }` | 合成完成（SKILL.md 已自动落盘） |
+| `continuation-start` | `{ requestId, personaId, round, max }` | 因 max_tokens 截断进入续写阶段（`round ≥ 2`）。详见 [§10.4.1](#1041-max_tokens-续写循环) |
+| `synthesis-end` | `{ requestId, personaId, truncated }` | 合成完成（SKILL.md 已自动落盘）。`truncated=true` 表示达到最大续写轮次仍未自然结束，输出可能不完整 |
 | `error` | `{ requestId, personaId, message }` | 蒸馏出错 |
 | `aborted` | `{ requestId, personaId }` | 蒸馏被中止 |
 
@@ -381,10 +378,11 @@ src/main/persona/
 │  情况 B：蒸馏中                                  │
 │   ✓ 提取 example.com                            │
 │   ⟳ 提取 notes.md                              │
-│   · 合成中…                                     │
+│   · 合成中… / 续写中 2/5（max_tokens 触发时）   │
 │   [实时预览（流式）]                            │
 │                                                 │
 │  情况 C：已有 SKILL.md                           │
+│   [⚠️ 输出可能被截断（条件出现）]                │
 │   [Markdown 编辑器 │ 实时预览]                  │
 ├────────────────────────────────────────────────┤
 │                              [🗑 删除此人格]     │
@@ -403,7 +401,9 @@ src/main/persona/
 - 配方切换不影响已有材料和 SKILL.md，下次蒸馏才生效
 - 蒸馏在主进程异步进行，离开 PersonaDetail 视图（切换到其他 Persona 或其他路由）不会取消，完成后 SKILL.md 自动落盘
 - 重新蒸馏不弹二次确认（用户责任，蒸馏前手动备份 SKILL.md 即可）
-- 蒸馏完成 / 失败 / 中止时由 PersonaStudio 顶层弹全局 toast
+- 蒸馏完成 / 失败 / 中止时由 PersonaStudio 顶层弹全局 toast；蒸馏完成且发生截断时 toast 改为 `error` 颜色文案 "<name> 蒸馏完成（输出已截断，请审阅）"
+- **续写中进度展示**：当 LLM 因 max_tokens 截断进入续写阶段时（`continuation-start` 事件），合成中标签变为 "续写中 X/5"，继续累加流式片段。详见 [§10.4.1](#1041-max_tokens-续写循环)
+- **截断警告条**：本次蒸馏达到最大续写轮次仍未结束（`synthesis-end.truncated=true`）时，已蒸馏 SKILL.md 编辑器顶部显示黄色可关闭警告条，提示"输出可能被截断 / 调高 maxTokens 后重新蒸馏 / 或手动补全"。切换 persona 或启动新蒸馏时自动清除
 
 ### 8.6 状态恢复
 
@@ -473,6 +473,71 @@ router.withScene('persona-synthesis', { requestId });
 2. `src/main/preload.ts` — 在 `contextBridge` 中暴露 `persona*` 方法（均返回 `Promise`）；`onPersonaEvent` 注册为 push listener
 3. `plugins/shared/bridge/src/types.ts` — `ElectronAPI` 接口增加 `persona*` 方法签名
 
+### 10.4 蒸馏鲁棒性
+
+合成阶段（Phase B-2）针对两类常见鲁棒性问题做了内置处理，全部集中在 `src/main/persona/distiller.ts` 的 `synthesize()` 函数中。
+
+#### 10.4.1 max_tokens 续写循环
+
+**问题**：长输出配方（特别是 nvwa-skill 这类详尽 SKILL.md 模板）在单次 LLM 调用下可能被 Provider 的 `max_tokens` 截断，导致 frontmatter 不完整、结构残缺、SKILL.md 无法解析。各主流 Provider 单次输出硬上限：Claude 8192、GPT-4o 16384、Gemini 8192。
+
+**机制**：`synthesize()` 内部为 do-while 循环——每轮调用完成后检查 `response.stop_reason`：
+
+| stop_reason | 行为 |
+|---|---|
+| `end_turn` | 正常结束，退出循环 |
+| `max_tokens` 且 `round < 5` | 把本轮 assistant 响应加入 messages 历史，追加 `CONTINUATION_PROMPT` 作为新 user 消息，进入下一轮 |
+| `max_tokens` 且 `round == 5` | 视为截断，`synthesis-end` 携带 `truncated=true` 退出 |
+
+**关键常量**（均在 `distiller.ts` 顶部声明，便于后续重构）：
+
+| 常量 | 值 | 说明 |
+|---|---|---|
+| `MAX_SYNTHESIS_ROUNDS` | 5 | 首轮 + 续写轮次合计上限。5 × 当前 maxTokens 通常足以覆盖绝大多数 SKILL.md 长度需求 |
+| `CONTINUATION_PROMPT` | 见代码 | 续写指令文案，明确"不要重复 / 不重新输出 frontmatter / 不要客套 / 直接以原文断点处的下一个字符开始" |
+
+**与 abort 的协作**：每轮调用前检查 `signal.aborted`，并把 `signal` 透传给 `streamMessage`。用户中止时立即终止当前轮，不会启动下一轮续写。
+
+**截断后的 UI 反馈**：
+
+- `continuation-start` 事件：UI 在合成中标签上显示 "续写中 X/5"
+- `synthesis-end.truncated=true`：编辑器顶部显示黄色截断警告条（详见 §8.5）；全局 toast 改为 error 颜色
+
+#### 10.4.2 双重锁定 prompt（覆盖 agentic 配方）
+
+**问题**：外部生态中存在大量为 agentic 宿主（Claude Code / OpenClaw 等）设计的 Skill 配方，它们假设具备多轮对话、subagent 派生、`WebSearch` / `bash` / 文件读写等工具调用、用户检查点确认等能力（典型案例：[`nvwa-skill`](https://github.com/xmg2024/nvwa-skill)）。这类配方放入 ToolBox 的"单次离线蒸馏"环境时，LLM 会按配方流程输出"执行过程报告"（Phase 0/1/1.5/2/2.5 中间产物、目录创建描述、subagent 模拟输出等）而非最终 SKILL.md，导致蒸馏完全不可用。
+
+**机制**：`synthesize()` 入口对 system prompt 与 user message 各做一次"约束追加"——双重锁定：
+
+| 注入位置 | 常量 | 作用 |
+|---|---|---|
+| **system prompt 末尾**（在配方 body 之后） | `SYNTHESIS_SYSTEM_CONSTRAINT` | 利用"最近指令"原则覆盖配方原本的 Phase 流程描述。声明无对话能力、无工具调用、无文件副作用、单次完整输出、材料即全部输入 |
+| **user message 末尾**（在 `extractionText` 之后） | `SYNTHESIS_USER_CONTRACT` | 作为 LLM 准备生成前最后看到的指令（最强位置）。要求"第一个非空字符必须是 `-`"作为可验证的格式锚点，禁止前置说明 / 过程描述 / 工具调用模拟 |
+
+```typescript
+const systemPrompt = recipeBody + SYNTHESIS_SYSTEM_CONSTRAINT;
+const userMessage = preamble + extractionText + SYNTHESIS_USER_CONTRACT;
+```
+
+**与续写循环的关系**：
+- 续写时 `messages` 数组追加 assistant 历史 + `CONTINUATION_PROMPT`，**不再追加 `SYNTHESIS_USER_CONTRACT`**（避免重复约束干扰续写"接字"语义）
+- system prompt 在所有轮次保持不变（始终包含 `SYNTHESIS_SYSTEM_CONSTRAINT`）
+
+**已知有损权衡**：双重锁定迫使 LLM 跳过 agentic 配方设计的 Phase 1.5 / Phase 2.5 等检查点，蒸馏质量天然受限。对于复杂的 agentic 配方，建议用户在原宿主（Claude Code 等）执行完整流程后，把成品 SKILL.md 直接放入 `userData/skills/<id>/` 由 Skill 系统消费，而非通过 Persona Studio 蒸馏。详见 [`docs/design/backlog.md`](backlog.md) 的"agentic 配方运行模式扩展"条目。
+
+#### 10.4.3 Dump 文件按轮次区分
+
+每轮续写在主进程通过 `LLMRouter.getProvider('persona-synthesis', { requestId, iteration: round })` 获取 `DumpingProvider` 实例，dump 文件名由 PromptDumper 按 iteration 自动区分：
+
+```
+userData/llm-dumps/2026-04-27/
+  2026-04-27T15-40-14-661_persona-synthesis_req-0405d570_iter1.json
+  2026-04-27T15-43-22-077_persona-synthesis_req-0405d570_iter2.json
+  2026-04-27T15-46-28-121_persona-synthesis_req-0405d570_iter3.json
+```
+
+便于事后排查"哪一轮的续写出了问题"。Phase B-1 的提取调用同一 requestId 但不传 iteration（每份材料并行调用，无序），dump 文件名仅含 requestId 和时间戳。
+
 ---
 
 ## 11. 不在本期范围（Backlog）
@@ -511,6 +576,15 @@ router.withScene('persona-synthesis', { requestId });
 - [ ] 返回 PersonaDetail 时若仍在蒸馏中应继续展示进度（事件继续推送）；若已完成则展示成品 SKILL.md
 - [ ] 蒸馏完成 / 失败 / 中止时全局 toast 弹出对应消息
 - [ ] 应用重启后 `personaListActiveDistillations()` 返回空（V1 不做 crash recovery）
+
+### 鲁棒性（max_tokens 续写 + 双重锁定）
+- [ ] 长输出场景下，LLM 触发 `stop_reason='max_tokens'` 后自动续写至多 5 轮，输出文本连续无断裂
+- [ ] 续写期间合成中标签变为 "续写中 X/5"，流式 chunk 持续累加到同一份预览中
+- [ ] 续写过程中点击"中止"立即终止，不会启动下一轮
+- [ ] 5 轮仍未结束时 `synthesis-end.truncated=true`，编辑器顶部出现黄色截断警告条，全局 toast 用 error 颜色显示
+- [ ] 截断警告条可手动关闭；切换 persona 或启动新蒸馏时自动消失
+- [ ] 用 nvwa-skill 等 agentic 配方蒸馏，输出第一个非空字符为 `-`（YAML frontmatter 起始），不出现 "# 蒸馏中"、"## Phase X"、"已创建 .claude/skills/..." 等过程描述
+- [ ] dump 目录 `userData/llm-dumps/<date>/` 下，每轮续写产生独立文件名 `_iter1.json` / `_iter2.json` / ...
 
 ### SKILL.md 编辑与发布
 - [ ] 蒸馏完成后 `userData/personas/<id>/SKILL.md` 写入；侧栏材料数和更新时间刷新
