@@ -82,7 +82,10 @@ async function extractSingle(
 
   const response = await provider.createMessage(
     systemPrompt,
-    [{ role: 'user', content: userContent }]
+    [{ role: 'user', content: userContent }],
+    undefined,
+    undefined,
+    signal
   );
 
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError');

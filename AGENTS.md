@@ -66,21 +66,6 @@ ToolBox/
 │   │       ├── skill-registry.ts     # 单例注册表 + 执行路由 + 风险判断 + 信任管理
 │   │       ├── skill-config.ts       # userData/skill-config.json 读写（disabled + trustedTools）
 │   │       ├── skill-ipc.ts          # IPC handlers + initializeSkillSystem
-│   │   └── persona/              # Persona Studio（角色工坊）框架（主进程侧）
-│   │       ├── types.ts              # PersonaMeta / Recipe / PersonaEvent 等类型
-│   │       ├── recipe-loader.ts      # SKILL.md 格式配方解析（宽容兼容开源格式）
-│   │       ├── recipe-registry.ts    # 配方注册表单例
-│   │       ├── material-collector.ts # URL 抓取（net.fetch）
-│   │       ├── distiller.ts          # 两阶段蒸馏编排（B-1 并行提取 + B-2 流式合成）
-│   │       ├── persona-store.ts      # userData/personas/ 读写
-│   │       ├── publisher.ts          # 发布：SKILL.md → userData/skills/
-│   │       ├── persona-ipc.ts        # IPC handlers + initializePersonaSystem
-│   │       ├── extraction-prompt.md  # B-1 通用提取 prompt（可直接编辑，无需改代码）
-│   │       └── builtin-recipes/      # 4 个内置配方（构建时由 copy-personas 拷贝到 dist）
-│   │           ├── public-figure/SKILL.md
-│   │           ├── thought-leader/SKILL.md
-│   │           ├── colleague/SKILL.md
-│   │           └── self/SKILL.md
 │   │       └── builtin-skills/       # 12 个内置 Skill（构建时由 copy-skills 拷贝到 dist）
 │   │           ├── web-search/       # 🔍 DuckDuckGo 联网搜索（仅摘要）
 │   │           ├── web-fetch/        # 🌐 抓取 URL 正文供 LLM 阅读/总结
@@ -94,6 +79,21 @@ ToolBox/
 │   │           ├── file-write/       # ✏️ 文件写入/删除/移动/批量（MODERATE）
 │   │           ├── desktop-action/   # 🖥️ 启动本地应用（MODERATE）
 │   │           └── run-script/       # ⚡ 执行 AI 生成脚本（MODERATE）
+│   │   └── persona/                  # Persona Studio（角色工坊）框架（主进程侧）
+│   │       ├── types.ts              # PersonaMeta / Recipe / PersonaEvent / PublishResult 类型
+│   │       ├── recipe-loader.ts      # SKILL.md 格式配方解析（宽容兼容开源格式）
+│   │       ├── recipe-registry.ts    # 配方注册表单例
+│   │       ├── material-collector.ts # URL 抓取（net.fetch + HTML 文本提取）
+│   │       ├── distiller.ts          # 两阶段蒸馏编排（B-1 并行提取 + B-2 流式合成，全程支持中止）
+│   │       ├── persona-store.ts      # userData/personas/ 读写 + slugifyName 工具
+│   │       ├── publisher.ts          # 发布：SKILL.md → userData/skills/<slug>/，4 种冲突场景
+│   │       ├── persona-ipc.ts        # IPC handlers + initializePersonaSystem
+│   │       ├── extraction-prompt.md  # B-1 通用提取 prompt（可直接编辑，无需改代码）
+│   │       └── builtin-recipes/      # 4 个内置配方（构建时由 copy-personas 拷贝到 dist）
+│   │           ├── public-figure/SKILL.md
+│   │           ├── thought-leader/SKILL.md
+│   │           ├── colleague/SKILL.md
+│   │           └── self/SKILL.md
 │   ├── renderer/                     # 启动页（Splash Screen）
 │   │   ├── splash.html               # 启动页 HTML
 │   │   └── splash.css                # 启动页样式
@@ -117,6 +117,12 @@ ToolBox/
 │       │       ├── Composer.vue      # 输入框 + 附件网格 + 发送/停止（单张 10MB / 6 张限制）
 │       │       ├── ImageLightbox.vue # 图片大图浏览（ESC/←→/另存为）
 │       │       └── MarkdownView.vue  # markdown-it + highlight.js 渲染
+│       │   └── persona/              # Persona Studio 角色工坊（工作区模型）
+│       │       ├── PersonaStudio.vue # 两栏容器：列表 + 工作区；顶层订阅 persona:event 维护活跃集合 + 全局 toast
+│       │       ├── PersonaList.vue   # 左栏：按已发布/草稿分组的列表 + 配方目录入口
+│       │       ├── PersonaItem.vue   # 单条目（inline 重命名 + 蒸馏中旋转图标）
+│       │       ├── PersonaDetail.vue # 工作区主体：材料区（Tab 切换 文本/文件/URL）+ SKILL.md 卡片（蒸馏控制 + 编辑器 + 发布按钮）
+│       │       └── RecipePickerModal.vue # 配方卡片选择器（新建人格 / 切换配方共用）
 │       ├── composables/
 │       │   ├── usePlugins.ts         # 插件注册表状态管理 composable
 │       │   └── useChat.ts            # Chat 状态 + IPC + chat:event 订阅（单例）
@@ -300,18 +306,24 @@ Skill 是为 LLM Chat 对话提供**工具调用能力**的声明式扩展机制
 | `skillListTrusted()` | `skill:list-trusted` | 获取所有永久信任工具列表（含 toolName / displayName / skillName） |
 | `skillUntrust(toolName)` | `skill:untrust` | 撤销某工具的永久信任，下次调用会重新弹窗 |
 | `personaListRecipes()` | `persona:list-recipes` | 列出所有配方（内置 + 用户自定义 `userData/persona-recipes/`） |
-| `personaFetchUrl(url)` | `persona:fetch-url` | 抓取 URL 返回可读文本，供材料收集阶段使用 |
-| `personaDistill(input)` | `persona:distill` | 启动两阶段蒸馏（B-1 提取 + B-2 合成），立即返回 `{ requestId }`，进度通过 `persona:event` 推送 |
-| `personaDistillAbort(requestId)` | `persona:distill-abort` | 中止进行中的蒸馏 |
-| `personaSave(input)` | `persona:save` | 保存/更新 persona（SKILL.md + meta.json，status: draft） |
-| `personaList()` | `persona:list` | 列出所有 persona（PersonaMeta 数组，按 updatedAt 降序） |
-| `personaLoad(id)` | `persona:load` | 加载 persona 详情（meta + SKILL.md 文本），不存在返回 null |
-| `personaLoadMaterials(id)` | `persona:load-materials` | 读取已存档材料内容数组（用于重新蒸馏） |
+| `personaFetchUrl(url)` | `persona:fetch-url` | 抓取 URL 返回可读文本（HTML 自动剥离标签），供材料收集阶段使用 |
+| `personaCreate(input)` | `persona:create` | 创建占位 Persona（写 meta.json，不写 SKILL.md）；`name` 留空使用"未命名人格 HH:mm"，`recipe_name` 留空使用第一个内置配方 |
+| `personaList()` | `persona:list` | 列出所有 persona（PersonaMeta 数组，按 updated 降序） |
+| `personaLoad(id)` | `persona:load` | 加载 persona 详情（meta + SKILL.md 文本），文件不存在时 SKILL.md 为空字符串 |
+| `personaRename(id, newName)` | `persona:rename` | 重命名 Persona |
+| `personaSetRecipe(id, recipeName)` | `persona:set-recipe` | 切换关联配方（不影响材料和 SKILL.md，下次蒸馏才生效） |
+| `personaAddMaterial(input)` | `persona:add-material` | 即时落盘单份材料（`type: 'text' \| 'file' \| 'url'`），写 materials/source-N.txt + 更新 meta.sources |
+| `personaRemoveMaterial(id, sourceIndex)` | `persona:remove-material` | 删除指定 index 的材料文件 + 更新 meta |
+| `personaSaveSkillMd(input)` | `persona:save-skill-md` | 保存 SKILL.md 文本编辑（不触发蒸馏） |
+| `personaDistill({id})` | `persona:distill` | 启动两阶段蒸馏（B-1 并行提取 + B-2 流式合成）。主进程从磁盘读最新材料和配方；返回 `{requestId}`，进度通过 `persona:event` 推送，完成后自动落盘 SKILL.md。两阶段均支持立即中止 |
+| `personaDistillAbort(requestId)` | `persona:distill-abort` | 中止进行中的蒸馏（底层 fetch 取消） |
+| `personaListActiveDistillations()` | `persona:list-active-distillations` | 返回当前正在进行中的 personaId 数组（启动时恢复 UI 旋转图标） |
 | `personaDelete(id)` | `persona:delete` | 删除 persona（同时撤销发布） |
-| `personaPublish(id)` | `persona:publish` | 发布：复制 SKILL.md → `userData/skills/<id>/`，status → published |
-| `personaUnpublish(id)` | `persona:unpublish` | 撤销发布：删除 `userData/skills/<id>/`，status → draft |
-| `personaOpenRecipeDir()` | `persona:open-recipe-dir` | 在 Finder 打开 `userData/persona-recipes/`（不存在时自动创建） |
-| `onPersonaEvent(cb)` | `persona:event`（push） | 订阅蒸馏进度事件（`extract-start` / `extract-done` / `synthesis-chunk` / `synthesis-end` / `error` / `aborted`），返回 dispose 函数 |
+| `personaPublish(id, options?)` | `persona:publish` | 发布 SKILL.md → `userData/skills/<slug>/`（slug = slugify(persona.name)）。返回 `PersonaPublishResult`：成功 → `{ok:true, publishedDir}`；跨 persona 冲突 → `{ok:false, reason:'directory_taken', dir, slug}`，前端弹确认后传 `{overwrite:true}` 强制覆盖；SKILL.md 为空 → `{ok:false, reason:'no_skill_md'}` |
+| `personaUnpublish(id)` | `persona:unpublish` | 撤销发布（按 meta.published_dir 删除，缺失时 fallback 用 persona id），status → draft |
+| `personaOpenRecipeDir()` | `persona:open-recipe-dir` | 在 Finder 打开用户配方目录 `userData/persona-recipes/`（不存在时自动创建） |
+| `personaOpenDir(id, target?)` | `persona:open-dir` | 在 Finder 打开 Persona 相关目录：`target='persona'` → `userData/personas/<id>/`，`target='published'` → `userData/skills/<published_dir>/` |
+| `onPersonaEvent(cb)` | `persona:event`（push） | 订阅蒸馏进度事件（`extract-start` / `extract-done` / `synthesis-chunk` / `synthesis-end` / `error` / `aborted`），所有事件携带 `personaId` 字段；返回 dispose 函数 |
 | `debugGetConfig()` | `debug:get-config` | 获取当前调试配置（含 `promptDump.enabled` / `maxFilesPerDay`） |
 | `debugSetConfig(config)` | `debug:set-config` | 更新调试配置（立即生效 + 持久化到 `userData/debug-config.json`） |
 | `debugOpenDumpDir()` | `debug:open-dump-dir` | 在资源管理器中打开 LLM dump 根目录 `userData/llm-dumps/` |
@@ -507,8 +519,8 @@ const msg = buildMultiImageMessage(
 | `docs/tech/llm-debug.md` | 技术 | LLM 调试与 Prompt Dump：文件结构、典型排查场景、安全隐私说明 |
 | `docs/design/backlog.md` | 需求/设计 | 待评估 / 待开发的需求想法积压池（Backlog），按桌面效率 / 学习辅助 / 认知提升分组 |
 | `docs/design/plugin-llm-interface-design.md` | 需求/设计 | 插件 LLM 接口规范：现存问题分析（进程隔离、UI 耦合、能力重叠）与架构方向（插件服务层） |
-| `docs/use/persona-studio.md` | 使用指南 | Persona Studio 使用指南：五步向导操作流程、配方选择与自定义、SKILL.md 配方格式、开源配方导入、extraction-prompt.md 调整、常见问题 |
-| `docs/design/persona-studio-design.md` | 需求/设计 | Persona Studio 设计文档：材料收集 → 多步蒸馏 → 持久化 → 发布为 Skill 的完整生产链路；配方系统（SKILL.md 兼容）、IPC API、Shell UI、构建集成（已立项） |
+| `docs/use/persona-studio.md` | 使用指南 | Persona Studio 使用指南：工作区模型操作流程（即时落盘 + 后台蒸馏）、配方选择与自定义、材料三种来源（Tab 切换）、发布冲突处理、SKILL.md 配方格式、开源配方导入、extraction-prompt.md 调整、常见问题 |
+| `docs/design/persona-studio-design.md` | 需求/设计 | Persona Studio 设计文档：工作区模型架构、4 种发布冲突场景、配方系统（SKILL.md 兼容 + RecipePickerModal 复用）、IPC API、Shell UI、构建集成（已实现） |
 | `docs/design/persona-feature-design.md` | 需求/设计 | LLM 思维角色（Persona）Chat 集成规格：工具能力与角色/思维方式解耦、会话级单选注入、与 ChatMode 正交；依赖 Persona Studio 产出的 SKILL.md（待立项） |
 
 > 新增文档后请在此表登记。
@@ -574,6 +586,7 @@ const msg = buildMultiImageMessage(
 - ❌ 删除 `.codebuddy/` 目录
 - ❌ **内置 Skill 脚本（`src/main/skill/builtin-skills/**/*.cjs`）禁止 `require` 第三方 npm 包**，只能用 `electron` 和 Node 内置模块
 - ❌ 跳过 `pnpm build:skills` — 修改 SKILL.md 或 .cjs 脚本后必须运行此命令，否则 `dist/main/skill/builtin-skills/` 不更新，运行时仍是旧版本
+- ❌ 跳过 `pnpm build:personas` — 修改 `src/main/persona/builtin-recipes/` 下任意配方 SKILL.md 或 `extraction-prompt.md` 后必须运行此命令，否则 `dist/main/persona/` 不更新，运行时配方/提取 prompt 仍是旧版本
 
 ## 10. 重要提醒
 
@@ -591,3 +604,8 @@ const msg = buildMultiImageMessage(
 - ⚠️ **Skill `.cjs` 脚本必须解包**：`electron-builder.json5` 的 `asarUnpack` 已包含 `dist/main/skill/builtin-skills/**/*`，生产环境从 `process.resourcesPath/app.asar.unpacked/...` 加载
 - ⚠️ **MODERATE 工具的确认拦截在 chat-engine 中实现**：通过 `pendingConfirmations` Map + `resolveConfirmation()` 函数串联 IPC 往返；用户点"永久信任"时会同时写入 Registry 内存和 `skill-config.json`
 - ⚠️ **PromptDumper 覆盖所有 LLM 调用**：`LLMRouter.getProvider()` 返回的是 `DumpingProvider` 代理，自动 dump 所有 `createMessage` / `streamMessage` / `generateImage` 调用。调用方通过 `router.withScene('scene-name', { requestId, sessionId, iteration })` 设置上下文，若未设置则 scene 为 `'unknown'`。开发环境默认开启，生产默认关闭。详见 [`docs/tech/llm-debug.md`](docs/tech/llm-debug.md)
+- ⚠️ **Persona Studio 在 `app.whenReady()` 时初始化**：`main.ts` 创建 `RecipeRegistry` 后调用 `initializePersonaSystem(router, registry)`，扫描内置 + 用户配方目录并注册所有 `persona:*` IPC handler
+- ⚠️ **Persona 配方文件必须解包**：`electron-builder.json5` 的 `asarUnpack` 包含 `dist/main/persona/builtin-recipes/**/*` 和 `dist/main/persona/extraction-prompt.md`，运行时通过 `path.join(__dirname, 'persona', ...)` 读取（recipe-loader 和 distiller 被 Vite 打包进 `dist/main/main-XXX.js`，`__dirname` 解析为 `dist/main/`，需拼上 `persona/` 子目录）
+- ⚠️ **Persona 工作区即时落盘**：所有 Persona 操作（`create` / `add-material` / `remove-material` / `rename` / `set-recipe` / `save-skill-md` / 蒸馏完成）即时写入 `userData/personas/<id>/`，离开页面再返回时状态完整保留；蒸馏在主进程异步进行，关闭工作区视图不会取消，完成后通过 `persona:event` 全局推送，UI 顶层订阅维护活跃指示器
+- ⚠️ **Persona 内部 ID 与发布目录解耦**：内部 Persona 目录名 = `<YYYYMMDD>-<8 位 uuid>`（与展示名解耦，重命名不影响路径）；发布目录名 = `slugify(persona.name)`（保留中文、最长 64 字符），跨 persona 冲突时返回 `directory_taken` 由前端弹确认；meta.json 的 `published_dir` 字段记录当前发布目录名，撤销发布按此精确删除（缺失时 fallback 用 persona id）
+- ⚠️ **LLM `createMessage` 接口已支持 AbortSignal**：第 5 个参数（`signal?: AbortSignal`）可选；三个 Provider（Claude/OpenAI/Gemini）和 DumpingProvider 均透传 signal 到底层 SDK fetch。Persona 蒸馏的 Phase B-1 提取阶段依赖此能力实现立即中止

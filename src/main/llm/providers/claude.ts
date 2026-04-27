@@ -46,19 +46,23 @@ export class ClaudeProvider implements LLMProvider {
     system: LLMSystemParam,
     messages: LLMMessageParam[],
     tools?: LLMToolDef[],
-    toolChoice?: LLMToolChoice
+    toolChoice?: LLMToolChoice,
+    signal?: AbortSignal
   ): Promise<LLMResponse> {
-    const resp = await this.client.messages.create({
-      model: this.model,
-      max_tokens: this.maxTokens,
-      system: toAnthropicSystem(system),
-      messages: messages as MessageParam[],
-      tools: tools?.length ? tools.map(toAnthropicTool) : undefined,
-      tool_choice:
-        tools?.length && toolChoice
-          ? toAnthropicToolChoice(toolChoice)
-          : undefined,
-    });
+    const resp = await this.client.messages.create(
+      {
+        model: this.model,
+        max_tokens: this.maxTokens,
+        system: toAnthropicSystem(system),
+        messages: messages as MessageParam[],
+        tools: tools?.length ? tools.map(toAnthropicTool) : undefined,
+        tool_choice:
+          tools?.length && toolChoice
+            ? toAnthropicToolChoice(toolChoice)
+            : undefined,
+      },
+      signal ? { signal } : undefined
+    );
     log.info(`createMessage 完成: stop_reason=${resp.stop_reason}, model=${this.model}`);
     return toUnifiedResponse(resp);
   }
@@ -129,7 +133,13 @@ export class ClaudeProvider implements LLMProvider {
       // 此时回退到非流式 createMessage，保证功能可用。
       if (/without sending any chunks/i.test(msg)) {
         log.warn(`streamMessage SSE 失败，回退非流式: ${msg}`);
-        const resp = await this.createMessage(system, messages);
+        const resp = await this.createMessage(
+          system,
+          messages,
+          tools,
+          toolChoice,
+          signal
+        );
         const text = resp.content
           .filter((b): b is LLMTextBlock => b.type === 'text')
           .map((b) => b.text)

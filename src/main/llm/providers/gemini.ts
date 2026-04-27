@@ -45,7 +45,8 @@ export class GeminiProvider implements LLMProvider {
     system: LLMSystemParam,
     messages: LLMMessageParam[],
     tools?: LLMToolDef[],
-    _toolChoice?: LLMToolChoice
+    _toolChoice?: LLMToolChoice,
+    signal?: AbortSignal
   ): Promise<LLMResponse> {
     const contents = toGeminiContents(messages);
     const toolDecls = tools?.length ? tools.map(toGeminiFunctionDecl) : undefined;
@@ -57,6 +58,7 @@ export class GeminiProvider implements LLMProvider {
       config: {
         systemInstruction: systemStr || undefined,
         maxOutputTokens: this.maxTokens,
+        ...(signal && { abortSignal: signal }),
         ...(toolDecls && { tools: [{ functionDeclarations: toolDecls }] }),
       },
     });

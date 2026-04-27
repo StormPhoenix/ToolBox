@@ -48,19 +48,23 @@ export class OpenAIProvider implements LLMProvider {
     system: LLMSystemParam,
     messages: LLMMessageParam[],
     tools?: LLMToolDef[],
-    toolChoice?: LLMToolChoice
+    toolChoice?: LLMToolChoice,
+    signal?: AbortSignal
   ): Promise<LLMResponse> {
     const openaiMessages = toOpenAIMessages(flattenSystem(system), messages);
     const openaiTools = tools?.length ? tools.map(toOpenAITool) : undefined;
 
-    const resp = await this.client.chat.completions.create({
-      model: this.model,
-      max_completion_tokens: this.maxTokens,
-      messages: openaiMessages,
-      tools: openaiTools,
-      tool_choice:
-        openaiTools && toolChoice ? toOpenAIToolChoice(toolChoice) : undefined,
-    });
+    const resp = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        max_completion_tokens: this.maxTokens,
+        messages: openaiMessages,
+        tools: openaiTools,
+        tool_choice:
+          openaiTools && toolChoice ? toOpenAIToolChoice(toolChoice) : undefined,
+      },
+      signal ? { signal } : undefined
+    );
 
     log.info(`createMessage 完成: finish_reason=${resp.choices[0]?.finish_reason}, model=${this.model}`);
     return toUnifiedResponse(resp);

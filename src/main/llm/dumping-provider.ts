@@ -56,7 +56,8 @@ export class DumpingProvider implements LLMProvider {
     system: LLMSystemParam,
     messages: LLMMessageParam[],
     tools?: LLMToolDef[],
-    toolChoice?: LLMToolChoice
+    toolChoice?: LLMToolChoice,
+    signal?: AbortSignal
   ): Promise<LLMResponse> {
     const ctx = this.ctx;
     const startedAt = Date.now();
@@ -67,7 +68,8 @@ export class DumpingProvider implements LLMProvider {
         system,
         messages,
         tools,
-        toolChoice
+        toolChoice,
+        signal
       );
       void dumpCall(
         this.buildChatRecord(

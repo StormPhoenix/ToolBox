@@ -18,7 +18,9 @@
           @dblclick="confirm"
         >
           <div class="recipe-name">{{ r.name }}</div>
-          <div class="recipe-desc">{{ r.description }}</div>
+          <div class="recipe-desc" :title="r.description">
+            {{ truncate(r.description, 80) }}
+          </div>
           <div v-if="r.suitable_for?.length" class="recipe-tags">
             <span v-for="t in r.suitable_for" :key="t" class="tag">{{ t }}</span>
           </div>
@@ -85,6 +87,12 @@ watch(
 
 function confirm(): void {
   if (selected.value) emit('select', selected.value);
+}
+
+/** 字符截断，超长加省略号；长描述时鼠标悬停可看完整版（title 属性） */
+function truncate(text: string, max: number): string {
+  if (!text) return '';
+  return text.length > max ? text.slice(0, max) + '…' : text;
 }
 </script>
 

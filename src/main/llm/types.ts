@@ -152,11 +152,18 @@ export interface LLMProviderConfig {
 export interface LLMProvider {
   readonly model: string;
 
+  /**
+   * 非流式生成。
+   *
+   * @param signal 可选 AbortSignal，用户中止时立即取消底层 fetch 并抛 AbortError；
+   *               未传时无中止能力（必须等 LLM 完整响应才返回）。
+   */
   createMessage(
     system: LLMSystemParam,
     messages: LLMMessageParam[],
     tools?: LLMToolDef[],
-    toolChoice?: LLMToolChoice
+    toolChoice?: LLMToolChoice,
+    signal?: AbortSignal
   ): Promise<LLMResponse>;
 
   /**
