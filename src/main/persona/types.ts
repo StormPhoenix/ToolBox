@@ -32,7 +32,19 @@ export interface PersonaMeta {
   created: string;
   updated: string;
   sources: PersonaSourceRef[];
+  /**
+   * 已发布到 userData/skills/ 下的目录名（不含路径前缀）。
+   * 仅 status='published' 时有值；用于撤销发布时精确删除并支持发布目录命名解耦于 persona id。
+   * 旧数据可能没有此字段，unpublish 时按 persona.id fallback。
+   */
+  published_dir?: string;
 }
+
+/** 发布结果（publishPersona 返回值） */
+export type PublishResult =
+  | { ok: true; publishedDir: string }
+  | { ok: false; reason: 'directory_taken'; dir: string; slug: string }
+  | { ok: false; reason: 'no_skill_md' };
 
 // ─── 配方 ───────────────────────────────────────────────────
 

@@ -10,6 +10,16 @@
           </span>
           <span class="meta-sep">·</span>
           <span class="meta-date">更新于 {{ formatDate(persona.updated) }}</span>
+          <span class="meta-sep">·</span>
+          <button class="meta-link" type="button" @click="openDir('persona')">
+            📂 本地目录
+          </button>
+          <template v-if="persona.status === 'published'">
+            <span class="meta-sep">·</span>
+            <button class="meta-link" type="button" @click="openDir('published')">
+              🚀 Skill 目录
+            </button>
+          </template>
         </div>
       </div>
       <div class="header-actions">
@@ -53,48 +63,81 @@
         </div>
         <div v-else class="empty-materials">尚无材料，添加至少 1 份后才能蒸馏</div>
 
-        <!-- 添加材料：文本 -->
-        <div class="add-row">
-          <textarea
-            v-model="textInput"
-            class="text-input"
-            placeholder="粘贴文字片段（可选）…"
-            rows="3"
-            :disabled="addingText"
-          />
+        <!-- 添加材料：Tab 切换 -->
+        <div class="add-tabs">
           <button
-            class="add-btn"
+            v-for="tab in TABS"
+            :key="tab.id"
+            class="tab"
+            :class="{ active: activeTab === tab.id }"
             type="button"
-            :disabled="!textInput.trim() || addingText"
-            @click="addText"
+            @click="activeTab = tab.id"
           >
-            {{ addingText ? '添加中…' : '添加文本' }}
+            <span class="tab-icon">{{ tab.icon }}</span>
+            <span>{{ tab.label }}</span>
           </button>
         </div>
 
-        <!-- 添加材料：文件 + URL -->
-        <div class="add-row inline">
-          <button class="upload-btn" type="button" :disabled="addingFile" @click="pickFile">
-            📂 选择文件
-          </button>
-          <input
-            v-model="urlInput"
-            class="url-input"
-            type="url"
-            placeholder="https://example.com/article"
-            :disabled="fetchingUrl"
-            @keydown.enter.prevent="addUrl"
-          />
-          <button
-            class="add-btn"
-            type="button"
-            :disabled="!urlInput.trim() || fetchingUrl"
-            @click="addUrl"
-          >
-            {{ fetchingUrl ? '抓取中…' : '抓取 URL' }}
-          </button>
+        <div class="tab-panel">
+          <!-- 文本 Tab -->
+          <div v-if="activeTab === 'text'" class="tab-content">
+            <textarea
+              v-model="textInput"
+              class="text-input"
+              placeholder="粘贴文章 / 笔记 / 对话…"
+              rows="5"
+              :disabled="addingText"
+            />
+            <div class="panel-actions">
+              <button
+                class="add-btn"
+                type="button"
+                :disabled="!textInput.trim() || addingText"
+                @click="addText"
+              >
+                {{ addingText ? '添加中…' : '添加文本' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 文件 Tab -->
+          <div v-else-if="activeTab === 'file'" class="tab-content file-tab">
+            <div class="tab-hint">支持 .txt / .md / .markdown 文件，可多选</div>
+            <div class="panel-actions center">
+              <button
+                class="upload-btn-large"
+                type="button"
+                :disabled="addingFile"
+                @click="pickFile"
+              >
+                📂 选择文件…
+              </button>
+            </div>
+          </div>
+
+          <!-- URL Tab -->
+          <div v-else class="tab-content">
+            <input
+              v-model="urlInput"
+              class="url-input"
+              type="url"
+              placeholder="https://example.com/article"
+              :disabled="fetchingUrl"
+              @keydown.enter.prevent="addUrl"
+            />
+            <div v-if="urlError" class="url-error">{{ urlError }}</div>
+            <div class="panel-actions">
+              <button
+                class="add-btn"
+                type="button"
+                :disabled="!urlInput.trim() || fetchingUrl"
+                @click="addUrl"
+              >
+                {{ fetchingUrl ? '抓取中…' : '抓取 URL' }}
+              </button>
+            </div>
+          </div>
         </div>
-        <div v-if="urlError" class="url-error">{{ urlError }}</div>
       </section>
 
       <!-- SKILL.md 区 -->
@@ -139,7 +182,7 @@
               class="action-btn small primary"
               type="button"
               :disabled="publishing"
-              @click="publish"
+              @click="publish()"
             >
               {{ publishing ? '发布中…' : '🚀 发布为 Skill' }}
             </button>
@@ -275,6 +318,16 @@ async function saveSkillMd(): Promise<void> {
 }
 
 // ── 材料操作 ─────────────────────────────────────────────
+
+type MaterialTab = 'text' | 'file' | 'url';
+
+const TABS: Array<{ id: MaterialTab; label: string; icon: string }> = [
+  { id: 'text', label: '文本', icon: '📝' },
+  { id: 'file', label: '文件', icon: '📂' },
+  { id: 'url', label: 'URL', icon: '🌐' },
+];
+
+const activeTab = ref<MaterialTab>('text');
 
 const textInput = ref('');
 const urlInput = ref('');
@@ -456,13 +509,37 @@ watch(() => props.persona.id, () => {
 
 const publishing = ref(false);
 
-async function publish(): Promise<void> {
+async function publish(overwrite = false): Promise<void> {
   publishing.value = true;
   try {
-    await window.electronAPI.personaPublish(props.persona.id);
-    // 重新加载 meta 以更新 status 徽标
-    const result = await window.electronAPI.personaLoad(props.persona.id);
-    if (result) emit('meta-updated', result.meta);
+    const result = await window.electronAPI.personaPublish(props.persona.id, {
+      overwrite,
+    });
+
+    if (result.ok) {
+      // 重新加载 meta 以更新 status 徽标和 published_dir
+      const loaded = await window.electronAPI.personaLoad(props.persona.id);
+      if (loaded) emit('meta-updated', loaded.meta);
+      return;
+    }
+
+    if (result.reason === 'no_skill_md') {
+      alert('SKILL.md 内容为空，无法发布');
+      return;
+    }
+
+    if (result.reason === 'directory_taken') {
+      const confirmed = confirm(
+        `目录 "${result.slug}" 已被另一份 Skill 占用。\n` +
+          `继续发布会覆盖现有内容（不可恢复），是否确认？`
+      );
+      if (confirmed) {
+        // 递归调用，强制覆盖
+        await publish(true);
+      }
+    }
+  } catch (err) {
+    alert(`发布失败：${(err as Error).message}`);
   } finally {
     publishing.value = false;
   }
@@ -476,6 +553,16 @@ async function unpublish(): Promise<void> {
     if (result) emit('meta-updated', result.meta);
   } finally {
     publishing.value = false;
+  }
+}
+
+// ── 打开本地目录 ─────────────────────────────────────────
+
+async function openDir(target: 'persona' | 'published'): Promise<void> {
+  const result = await window.electronAPI.personaOpenDir(props.persona.id, target);
+  if (!result.ok) {
+    // 目录不存在（极少出现：persona 已删除 or 已撤销发布），静默忽略
+    console.warn(`打开目录失败: ${result.error}`);
   }
 }
 
@@ -556,6 +643,23 @@ function formatDate(iso: string): string {
 }
 
 .meta-sep { color: var(--border); }
+
+/* meta 行内联链接按钮 */
+.meta-link {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  transition: color var(--transition);
+}
+.meta-link:hover {
+  color: var(--accent-light);
+}
 
 /* 配方切换按钮（头部右上角） */
 .recipe-btn {
@@ -746,27 +850,83 @@ function formatDate(iso: string): string {
   margin-bottom: 12px;
 }
 
-.add-row {
+/* Tab 切换 */
+.add-tabs {
   display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-  align-items: flex-start;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
 }
-.add-row.inline {
+
+.tab {
+  display: inline-flex;
   align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.82rem;
+  transition: color var(--transition), border-color var(--transition);
+  margin-bottom: -1px;
+}
+.tab:hover {
+  color: var(--text-primary);
+}
+.tab.active {
+  color: var(--accent-light);
+  border-bottom-color: var(--accent);
+}
+.tab-icon {
+  font-size: 0.92rem;
+}
+
+.tab-panel {
+  min-height: 140px;
+}
+
+.tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tab-content.file-tab {
+  align-items: stretch;
+  text-align: center;
+  padding: 8px 0;
+}
+
+.tab-hint {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  padding: 6px 0 8px;
+}
+
+.panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.panel-actions.center {
+  justify-content: center;
+  padding: 14px 0 4px;
 }
 
 .text-input {
-  flex: 1;
   background: var(--bg-base);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
-  padding: 8px 10px;
+  padding: 10px 12px;
   font-size: 0.86rem;
   resize: vertical;
   font-family: inherit;
   line-height: 1.5;
+  width: 100%;
+  box-sizing: border-box;
 }
 .text-input:focus {
   outline: none;
@@ -774,13 +934,14 @@ function formatDate(iso: string): string {
 }
 
 .url-input {
-  flex: 1;
   background: var(--bg-base);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
-  padding: 8px 10px;
+  padding: 10px 12px;
   font-size: 0.86rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 .url-input:focus {
   outline: none;
@@ -790,29 +951,45 @@ function formatDate(iso: string): string {
 .url-error {
   color: #fca5a5;
   font-size: 0.78rem;
-  margin-top: -4px;
 }
 
-.upload-btn,
 .add-btn {
-  padding: 8px 14px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
+  padding: 7px 16px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
+  color: #fff;
   cursor: pointer;
   font-size: 0.84rem;
   white-space: nowrap;
+  font-weight: 500;
+  transition: background var(--transition), opacity var(--transition);
+}
+.add-btn:hover:not(:disabled) {
+  background: var(--accent-light);
+}
+.add-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.upload-btn-large {
+  padding: 10px 24px;
+  background: var(--bg-base);
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.88rem;
   transition: background var(--transition), border-color var(--transition);
 }
-.upload-btn:hover:not(:disabled),
-.add-btn:hover:not(:disabled) {
+.upload-btn-large:hover:not(:disabled) {
   background: var(--bg-card-hover);
   border-color: var(--accent);
+  border-style: solid;
 }
-.upload-btn:disabled,
-.add-btn:disabled {
-  opacity: 0.4;
+.upload-btn-large:disabled {
+  opacity: 0.45;
   cursor: not-allowed;
 }
 

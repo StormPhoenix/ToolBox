@@ -199,14 +199,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   personaDelete: (id: string) =>
     ipcRenderer.invoke('persona:delete', id),
 
-  personaPublish: (id: string) =>
-    ipcRenderer.invoke('persona:publish', id),
+  personaPublish: (id: string, options?: { overwrite?: boolean }) =>
+    ipcRenderer.invoke('persona:publish', id, options),
 
   personaUnpublish: (id: string) =>
     ipcRenderer.invoke('persona:unpublish', id),
 
   personaOpenRecipeDir: () =>
     ipcRenderer.invoke('persona:open-recipe-dir'),
+
+  personaOpenDir: (id: string, target?: 'persona' | 'published') =>
+    ipcRenderer.invoke('persona:open-dir', id, target ?? 'persona'),
 
   /**
    * 订阅 Persona 蒸馏进度事件流，返回 dispose 函数。

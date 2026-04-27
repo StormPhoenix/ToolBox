@@ -52,8 +52,13 @@ import {
   listPersonas,
   loadPersona,
   deletePersona,
+  getPersonaDir,
 } from './persona-store';
-import { publishPersona, unpublishPersona } from './publisher';
+import {
+  publishPersona,
+  unpublishPersona,
+  getPublishedSkillDir,
+} from './publisher';
 import { createLogger } from '../logger';
 
 const log = createLogger('Persona-IPC');
@@ -182,9 +187,12 @@ function registerPersonaHandlers(router: LLMRouter, registry: RecipeRegistry): v
   });
 
   // ── persona:publish ───────────────────────────────────────
-  ipcMain.handle('persona:publish', async (_e, id: string) => {
-    await publishPersona(id);
-  });
+  ipcMain.handle(
+    'persona:publish',
+    async (_e, id: string, options?: { overwrite?: boolean }) => {
+      return publishPersona(id, options?.overwrite ?? false);
+    }
+  );
 
   // ── persona:unpublish ─────────────────────────────────────
   ipcMain.handle('persona:unpublish', async (_e, id: string) => {
@@ -200,6 +208,25 @@ function registerPersonaHandlers(router: LLMRouter, registry: RecipeRegistry): v
     await shell.openPath(recipeDir);
     log.info(`打开配方目录: ${recipeDir}`);
   });
+
+  // ── persona:open-dir ──────────────────────────────────────
+  // target: 'persona' → 打开 userData/personas/<id>/
+  //         'published' → 打开 userData/skills/<published_dir>/
+  ipcMain.handle(
+    'persona:open-dir',
+    async (_e, id: string, target: 'persona' | 'published' = 'persona') => {
+      const dir =
+        target === 'published'
+          ? await getPublishedSkillDir(id)
+          : getPersonaDir(id);
+      if (!existsSync(dir)) {
+        return { ok: false, error: '目录不存在' };
+      }
+      await shell.openPath(dir);
+      log.info(`打开目录 (${target}): ${dir}`);
+      return { ok: true };
+    }
+  );
 
   log.info('Persona IPC handlers 已注册');
 }

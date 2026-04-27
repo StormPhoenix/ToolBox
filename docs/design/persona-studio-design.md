@@ -148,7 +148,8 @@ userData/
       SKILL.md
 
   personas/
-    <persona-id>/               # id = 时间戳-slug-uuid，如 "20260427-elon-musk-a1b2c3d4"
+    <persona-id>/               # id = "<YYYYMMDD>-<8 位 uuid>"，如 "20260427-a1b2c3d4"
+                                # 与展示名彻底解耦，重命名不影响目录路径
       meta.json                 # PersonaMeta（见 §5.2），创建时即写入
       materials/                # 原始材料本地存档（添加材料时即时落盘）
         source-0.txt            # 文本输入
@@ -157,7 +158,8 @@ userData/
       SKILL.md                  # 仅在首次蒸馏完成后写入；不存在 ⇒ "未蒸馏过"
 
   skills/
-    <persona-id>/               # 发布时生成，供 Skill 系统消费
+    <slug>/                     # 发布目录名 = slugify(persona.name)
+                                # 与 Persona 内部 id 解耦；冲突时弹确认后覆盖
       SKILL.md                  # 从 personas/<id>/SKILL.md 复制而来
 ```
 
@@ -176,10 +178,29 @@ interface PersonaMeta {
     label: string;      // 文件名或 URL
     stored_as: string;  // materials/ 目录下的文件名
   }>;
+  /**
+   * 当前已发布到 userData/skills/ 下的目录名。
+   * 仅 status='published' 时有值；用于撤销发布时精确删除并支持发布目录命名解耦于 persona id。
+   * 旧数据可能没有此字段，unpublish 时按 persona.id fallback 删除（向下兼容）。
+   */
+  published_dir?: string;
 }
 ```
 
 代码层不感知 SKILL.md 的内容结构，内容 schema 完全由配方决定。
+
+### 5.3 发布冲突处理（4 种场景）
+
+发布目录名 = `slugify(persona.name)`（保留中文、空格转 `-`、最长 64 字符）。
+
+| 场景 | 检测条件 | 行为 | 是否弹窗 |
+|---|---|---|---|
+| **A. 首次发布** | 目标目录不存在 + meta 无 published_dir | 直接写入，记录 published_dir | 否 |
+| **B. 重发布同一 persona** | 目标目录 == 当前 published_dir | 直接覆盖，更新内容 | 否 |
+| **C. 重命名后重发布** | 目标目录与 published_dir 不同，新目标不存在 | 删除旧 published_dir + 写新目录 | 否 |
+| **D. 跨 persona 冲突** | 目标目录存在但不属于当前 persona | 返回 `directory_taken`；前端弹确认后再调 `publish(id, {overwrite:true})` 强制覆盖 | 是 |
+
+撤销发布优先按 `meta.published_dir` 删除；缺失时按 `persona.id` fallback（兼容旧数据）。
 
 ---
 
@@ -255,8 +276,9 @@ src/main/persona/
 
 | 方法 | IPC 通道 | 说明 |
 |---|---|---|
-| `personaPublish(id)` | `persona:publish` | 复制 SKILL.md → `userData/skills/<id>/`，status → published |
-| `personaUnpublish(id)` | `persona:unpublish` | 删除 `userData/skills/<id>/`，status → draft |
+| `personaPublish(id, options?)` | `persona:publish` | 发布 SKILL.md → `userData/skills/<slug>/`；返回结构化结果 `PersonaPublishResult`。冲突场景 D 时返回 `{ok:false, reason:'directory_taken', dir, slug}`，前端弹确认后传 `{overwrite:true}` 强制覆盖；SKILL.md 为空时返回 `{ok:false, reason:'no_skill_md'}` |
+| `personaUnpublish(id)` | `persona:unpublish` | 删除已发布目录（按 meta.published_dir，缺失时 fallback 用 persona id），status → draft |
+| `personaOpenDir(id, target)` | `persona:open-dir` | 在资源管理器中打开 Persona 目录；`target='persona'` → `userData/personas/<id>/`，`target='published'` → `userData/skills/<published_dir>/`；目录不存在时返回 `{ok:false, error}` |
 
 ### 7.6 事件订阅
 
@@ -328,7 +350,8 @@ src/main/persona/
 ```
 ┌────────────────────────────────────────────────┐
 │ [Name]                  [🧪 公众人物蒸馏 ▾]     │
-│ [draft/published] · 更新于 2026-04-27 17:42     │
+│ [draft] · 更新于 17:42 · 📂 本地目录             │
+│   (已发布时还会出现 · 🚀 Skill 目录)             │
 ├────────────────────────────────────────────────┤
 │ 材料 (3)                                        │
 │  ▸ [文本] 这是一段关于费曼思维方式的笔记…  [×]  │
@@ -358,6 +381,8 @@ src/main/persona/
 
 **布局要点**：
 - **头部右上角**：配方切换按钮（`🧪 配方名 ▾`），点击弹出 `RecipePickerModal` 卡片选择器
+- **头部 meta 行**：状态徽标 + 更新时间 + 📂 本地目录链接（已发布时额外有 🚀 Skill 目录链接），用于在 Finder 中打开本地存储位置
+- **材料区添加输入**：用 Tab 切换三种来源（📝 文本 / 📂 文件 / 🌐 URL），默认选中「文本」。每个 Tab 内空间独立，文本框多行、URL 单行带错误提示、文件 Tab 居中放置大号选择按钮
 - **SKILL.md 卡片右上角**：把全部产物相关操作集中在此——蒸馏控制（开始 / 重新蒸馏 / 中止）、保存修改、发布 / 撤销发布
 - **材料 label**：文本类型显示内容前 30 字符（截断后省略号），文件显示文件名，URL 显示 hostname
 

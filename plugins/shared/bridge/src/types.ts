@@ -874,14 +874,36 @@ export interface ElectronAPI {
   /** 删除 persona（同时撤销发布） */
   personaDelete(id: string): Promise<void>;
 
-  /** 发布 persona 为 Skill（复制 SKILL.md 到 userData/skills/） */
-  personaPublish(id: string): Promise<void>;
+  /**
+   * 发布 persona 为 Skill。
+   *
+   * 发布目录名 = slugify(persona.name)。冲突场景：
+   *   - 同一 persona 重发布或重命名后重发布：自动覆盖/迁移，无需 overwrite
+   *   - 跨 persona 冲突（目标目录已被其他 Skill 占用）：返回 directory_taken，
+   *     由前端弹确认后再次调用并传 overwrite=true 强制覆盖
+   *   - SKILL.md 为空：返回 no_skill_md
+   */
+  personaPublish(
+    id: string,
+    options?: { overwrite?: boolean }
+  ): Promise<PersonaPublishResult>;
 
   /** 撤销发布（删除 userData/skills/<id>/） */
   personaUnpublish(id: string): Promise<void>;
 
   /** 在资源管理器中打开用户配方目录 userData/persona-recipes/（不存在时自动创建） */
   personaOpenRecipeDir(): Promise<void>;
+
+  /**
+   * 在资源管理器中打开 Persona 相关目录。
+   * target='persona'    → userData/personas/<id>/
+   * target='published'  → userData/skills/<id>/（仅已发布时存在）
+   * 目录不存在时返回 { ok: false, error }，不抛错。
+   */
+  personaOpenDir(
+    id: string,
+    target?: 'persona' | 'published'
+  ): Promise<{ ok: true } | { ok: false; error: string }>;
 
   /**
    * 订阅蒸馏进度事件流，返回 dispose 函数。
@@ -937,7 +959,15 @@ export interface PersonaMeta {
   created: string;
   updated: string;
   sources: PersonaSourceRef[];
+  /** 当前已发布到 userData/skills/ 下的目录名，仅 status='published' 时有值 */
+  published_dir?: string;
 }
+
+/** Persona 发布结果 */
+export type PersonaPublishResult =
+  | { ok: true; publishedDir: string }
+  | { ok: false; reason: 'directory_taken'; dir: string; slug: string }
+  | { ok: false; reason: 'no_skill_md' };
 
 /** persona:create 入参 */
 export interface PersonaCreateInput {

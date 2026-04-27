@@ -36,9 +36,13 @@ export function getPersonasBaseDir(): string {
   return path.join(app.getPath('userData'), 'personas');
 }
 
-function personaDir(id: string): string {
+/** Persona 主目录绝对路径（公开供 IPC 打开目录使用） */
+export function getPersonaDir(id: string): string {
   return path.join(getPersonasBaseDir(), id);
 }
+
+/** 别名：模块内部使用的短名 */
+const personaDir = getPersonaDir;
 
 function metaPath(id: string): string {
   return path.join(personaDir(id), 'meta.json');
@@ -54,15 +58,39 @@ function materialsDir(id: string): string {
 
 // ─── ID / 文件名生成 ─────────────────────────────────────────
 
-function generateId(name: string): string {
+/**
+ * 内部 Persona 目录名 ID。
+ *
+ * 格式：`<YYYYMMDD>-<8 位 uuid>`，例如 `20260427-a1b2c3d4`。
+ *
+ * - 与展示名彻底解耦（重命名不影响目录路径）
+ * - 日期前缀便于 ls/Finder 按时间排序
+ * - 8 位 uuid 段保证唯一性
+ */
+function generateId(): string {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const slug = name
-    .toLowerCase()
-    .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 32) || 'persona';
   const uid = randomUUID().slice(0, 8);
-  return `${date}-${slug}-${uid}`;
+  return `${date}-${uid}`;
+}
+
+/**
+ * 把人格展示名 slug 化为发布目录名。
+ *
+ * 规则：
+ * - 保留中文字符（filesystem 都支持）
+ * - 空格 / 路径非法字符（/\:*?"<>|）→ 连字符
+ * - 多个连续连字符合并
+ * - 长度限制 64 字符
+ * - slug 化后为空（极端情况：纯特殊字符）→ 返回空字符串，由调用方 fallback
+ */
+export function slugifyName(name: string): string {
+  return name
+    .trim()
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\\/:*?"<>|\x00-\x1f\s]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
 }
 
 function defaultPlaceholderName(): string {
@@ -116,7 +144,7 @@ export async function createPersona(
 ): Promise<PersonaMeta> {
   const finalName = (name?.trim()) || defaultPlaceholderName();
   const now = new Date().toISOString();
-  const id = generateId(finalName);
+  const id = generateId();
 
   const meta: PersonaMeta = {
     id,
@@ -264,6 +292,32 @@ export async function updatePersonaStatus(
   meta.status = status;
   touchUpdated(meta);
   await writeMeta(meta);
+}
+
+/**
+ * 更新 meta.json 的发布字段（published_dir + status）。
+ * publishedDir 为 null 时清空字段（撤销发布）。
+ */
+export async function updatePersonaPublishInfo(
+  id: string,
+  publishedDir: string | null
+): Promise<PersonaMeta> {
+  const meta = await readMeta(id);
+  if (publishedDir) {
+    meta.status = 'published';
+    meta.published_dir = publishedDir;
+  } else {
+    meta.status = 'draft';
+    delete meta.published_dir;
+  }
+  touchUpdated(meta);
+  await writeMeta(meta);
+  return meta;
+}
+
+/** 读取 meta（公开，供 publisher 读 published_dir） */
+export async function readPersonaMeta(id: string): Promise<PersonaMeta> {
+  return readMeta(id);
 }
 
 /** 读取 SKILL.md 内容（供 publisher 复制） */
