@@ -309,7 +309,7 @@ Skill 是为 LLM Chat 对话提供**工具调用能力**的声明式扩展机制
 | `skillUntrust(toolName)` | `skill:untrust` | 撤销某工具的永久信任，下次调用会重新弹窗 |
 | `personaListRecipes()` | `persona:list-recipes` | 列出所有配方（内置 + 用户自定义 `userData/persona-recipes/`） |
 | `personaFetchUrl(url)` | `persona:fetch-url` | 抓取 URL 返回可读文本（HTML 自动剥离标签），供材料收集阶段使用 |
-| `personaCreate(input)` | `persona:create` | 创建占位 Persona（写 meta.json，不写 SKILL.md）；`name` 留空使用"未命名人格 HH:mm"，`recipe_name` 留空使用第一个内置配方 |
+| `personaCreate(input)` | `persona:create` | 创建占位 Persona（写 meta.json，不写 SKILL.md）；`name` 留空使用"未命名人格 HH:mm"；`source_type='distilled'`（默认）时 `recipe_name` 留空使用第一个内置配方；`source_type='imported'` 时跳过配方选择，`recipe_name` 存空字符串，并可附 `imported_from` 记录原始文件路径 |
 | `personaList()` | `persona:list` | 列出所有 persona（PersonaMeta 数组，按 updated 降序） |
 | `personaLoad(id)` | `persona:load` | 加载 persona 详情（meta + SKILL.md 文本），文件不存在时 SKILL.md 为空字符串 |
 | `personaRename(id, newName)` | `persona:rename` | 重命名 Persona |

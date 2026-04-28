@@ -34,14 +34,12 @@
       />
     </div>
 
-    <!-- 新建：选配方模态 -->
-    <RecipePickerModal
+    <!-- 新建：选择方式模态（新建/导入） -->
+    <CreatePersonaModal
       v-if="showCreateModal"
       :recipes="recipes"
-      title="新建人格"
-      subtitle="先为这份人格选定一个蒸馏配方，名称稍后可在侧栏重命名"
-      confirm-label="创建"
-      @select="onCreateModalSelect"
+      @create-new="onCreateNew"
+      @create-import="onCreateImport"
       @cancel="showCreateModal = false"
     />
 
@@ -59,7 +57,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import type { PersonaMeta, PersonaRecipeInfo, PersonaEvent } from '@toolbox/bridge';
 import PersonaList from './PersonaList.vue';
 import PersonaDetail from './PersonaDetail.vue';
-import RecipePickerModal from './RecipePickerModal.vue';
+import CreatePersonaModal from './CreatePersonaModal.vue';
 
 // ── 数据 ───────────────────────────────────────────────────
 
@@ -173,14 +171,10 @@ onBeforeUnmount(() => {
 const showCreateModal = ref(false);
 
 function createPersona(): void {
-  if (recipes.value.length === 0) {
-    showToast('error', '当前没有可用配方，无法新建');
-    return;
-  }
   showCreateModal.value = true;
 }
 
-async function onCreateModalSelect(recipeName: string): Promise<void> {
+async function onCreateNew(recipeName: string): Promise<void> {
   showCreateModal.value = false;
   try {
     const meta = await window.electronAPI.personaCreate({ recipe_name: recipeName });
@@ -188,6 +182,21 @@ async function onCreateModalSelect(recipeName: string): Promise<void> {
     await selectPersona(meta.id);
   } catch (err) {
     showToast('error', `创建失败：${(err as Error).message}`);
+  }
+}
+
+async function onCreateImport(filePath: string, content: string): Promise<void> {
+  showCreateModal.value = false;
+  try {
+    const meta = await window.electronAPI.personaCreate({
+      source_type: 'imported',
+      imported_from: filePath,
+    });
+    await window.electronAPI.personaSaveSkillMd({ id: meta.id, skillMd: content });
+    await refreshPersonas();
+    await selectPersona(meta.id);
+  } catch (err) {
+    showToast('error', `导入失败：${(err as Error).message}`);
   }
 }
 

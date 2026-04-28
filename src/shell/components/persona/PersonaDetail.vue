@@ -23,7 +23,20 @@
         </div>
       </div>
       <div class="header-actions">
+        <!-- 导入型：只读来源标记，点击在资源管理器中定位文件所在目录 -->
         <button
+          v-if="isImported"
+          class="import-source-badge"
+          type="button"
+          :title="persona.imported_from ? `来源：${persona.imported_from}\n点击在资源管理器中打开所在目录` : '外部导入'"
+          @click="openImportedFileDir"
+        >
+          <span>📥</span>
+          <span class="import-source-name">{{ importedFileName }}</span>
+        </button>
+        <!-- 蒸馏型：配方切换按钮 -->
+        <button
+          v-else
           class="recipe-btn"
           type="button"
           :disabled="recipeChanging"
@@ -40,8 +53,8 @@
 
     <div class="detail-body">
 
-      <!-- 材料区 -->
-      <section class="materials-section">
+      <!-- 材料区（导入型不展示） -->
+      <section v-if="!isImported" class="materials-section">
         <div class="section-header">
           <h3>材料 <span class="count">({{ persona.sources.length }})</span></h3>
         </div>
@@ -145,9 +158,9 @@
         <div class="section-header">
           <h3>SKILL.md</h3>
           <div class="section-actions">
-            <!-- 蒸馏控制 -->
+            <!-- 蒸馏控制（导入型不展示） -->
             <button
-              v-if="!isDistilling"
+              v-if="!isImported && !isDistilling"
               class="action-btn small"
               type="button"
               :disabled="persona.sources.length === 0"
@@ -157,7 +170,7 @@
               {{ hasSkillMd ? '🔄 重新蒸馏' : '✨ 开始蒸馏' }}
             </button>
             <button
-              v-if="isDistilling"
+              v-if="!isImported && isDistilling"
               class="action-btn small danger"
               type="button"
               @click="abortDistill"
@@ -225,8 +238,8 @@
           </div>
         </div>
 
-        <!-- 未蒸馏过：占位 -->
-        <div v-else-if="!hasSkillMd" class="skill-empty">
+        <!-- 未蒸馏过：占位（仅蒸馏型） -->
+        <div v-else-if="!hasSkillMd && !isImported" class="skill-empty">
           <div class="empty-msg">尚未生成 SKILL.md。添加材料后点击「开始蒸馏」。</div>
         </div>
 
@@ -312,6 +325,26 @@ const emit = defineEmits<{
   'meta-updated': [meta: PersonaMeta];
   'skill-md-updated': [content: string];
 }>();
+
+// ── 导入型判断 ────────────────────────────────────────────
+
+const isImported = computed(() => props.persona.source_type === 'imported');
+
+/** 导入来源文件名（不含路径）*/
+const importedFileName = computed(() => {
+  const p = props.persona.imported_from;
+  if (!p) return '外部导入';
+  return p.split(/[\\/]/).pop() ?? p;
+});
+
+/** 点击来源标记：在资源管理器中打开文件所在目录 */
+async function openImportedFileDir(): Promise<void> {
+  const p = props.persona.imported_from;
+  if (!p) return;
+  // 取父目录路径
+  const dir = p.replace(/[\\/][^\\/]+$/, '') || p;
+  await window.electronAPI.openInExplorer(dir);
+}
 
 // ── SKILL.md 编辑状态 ─────────────────────────────────────
 
@@ -707,6 +740,32 @@ function formatDate(iso: string): string {
 }
 .meta-link:hover {
   color: var(--accent-light);
+}
+
+/* 导入来源标记（头部右上角，仅导入型显示） */
+.import-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(52, 211, 153, 0.1);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  border-radius: var(--radius-sm);
+  color: #6ee7b7;
+  cursor: pointer;
+  font-size: 0.84rem;
+  max-width: 280px;
+  transition: background var(--transition), border-color var(--transition);
+}
+.import-source-badge:hover {
+  background: rgba(52, 211, 153, 0.18);
+  border-color: rgba(52, 211, 153, 0.5);
+}
+.import-source-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
 }
 
 /* 配方切换按钮（头部右上角） */

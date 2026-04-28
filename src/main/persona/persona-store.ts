@@ -140,7 +140,11 @@ function touchUpdated(meta: PersonaMeta): void {
 /** 创建一个空白 Persona 占位（不写 SKILL.md） */
 export async function createPersona(
   name: string | undefined,
-  recipeName: string
+  recipeName: string,
+  options?: {
+    source_type?: 'distilled' | 'imported';
+    imported_from?: string;
+  }
 ): Promise<PersonaMeta> {
   const finalName = (name?.trim()) || defaultPlaceholderName();
   const now = new Date().toISOString();
@@ -154,13 +158,15 @@ export async function createPersona(
     created: now,
     updated: now,
     sources: [],
+    ...(options?.source_type ? { source_type: options.source_type } : {}),
+    ...(options?.imported_from ? { imported_from: options.imported_from } : {}),
   };
 
   await fsp.mkdir(personaDir(id), { recursive: true });
   await fsp.mkdir(materialsDir(id), { recursive: true });
   await writeMeta(meta);
 
-  log.info(`Persona 已创建: ${id} (${finalName})`);
+  log.info(`Persona 已创建: ${id} (${finalName}, source_type=${options?.source_type ?? 'distilled'})`);
   return meta;
 }
 

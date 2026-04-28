@@ -114,14 +114,21 @@ function registerPersonaHandlers(router: LLMRouter, registry: RecipeRegistry): v
 
   // ── persona:create ────────────────────────────────────────
   ipcMain.handle('persona:create', async (_e, input: PersonaCreateInput) => {
-    // 默认配方 = 第一个内置
+    if (input.source_type === 'imported') {
+      // 导入型：不需要配方，recipe_name 存空字符串
+      return createPersona(input.name, '', {
+        source_type: 'imported',
+        imported_from: input.imported_from,
+      });
+    }
+    // 蒸馏型：默认配方 = 第一个内置
     const recipes = registryRef?.listRecipes() ?? [];
     const fallbackRecipe = recipes.find(r => r.builtin)?.name ?? recipes[0]?.name ?? '';
     const recipeName = input.recipe_name?.trim() || fallbackRecipe;
     if (!recipeName) {
       throw new Error('当前没有可用配方，请先放置或重启应用');
     }
-    return createPersona(input.name, recipeName);
+    return createPersona(input.name, recipeName, { source_type: 'distilled' });
   });
 
   // ── persona:add-material ──────────────────────────────────

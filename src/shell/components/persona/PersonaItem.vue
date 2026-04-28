@@ -20,7 +20,12 @@
       </template>
       <template v-else>
         <div class="item-name" :title="persona.name">{{ persona.name }}</div>
-        <div class="item-meta">
+        <!-- 导入型：只显示来源徽标 -->
+        <div v-if="persona.source_type === 'imported'" class="item-meta">
+          <span class="import-tag">📥 已导入</span>
+        </div>
+        <!-- 蒸馏型：显示配方 + 材料数 -->
+        <div v-else class="item-meta">
           <span class="recipe-tag" :title="persona.recipe_name">{{ persona.recipe_name }}</span>
           <span>·</span>
           <span>{{ persona.sources.length }} 份材料</span>
@@ -172,6 +177,15 @@ function confirmDelete(): void {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 90px;
+}
+
+.import-tag {
+  background: rgba(52, 211, 153, 0.12);
+  color: #6ee7b7;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  white-space: nowrap;
 }
 
 .item-actions {

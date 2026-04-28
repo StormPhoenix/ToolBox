@@ -38,6 +38,17 @@ export interface PersonaMeta {
    * 旧数据可能没有此字段，unpublish 时按 persona.id fallback。
    */
   published_dir?: string;
+  /**
+   * 人格来源类型。
+   * - 'distilled'：通过材料 + 配方蒸馏产生（默认，旧数据无此字段时视为 distilled）
+   * - 'imported'：直接导入用户已有的 SKILL.md 文件
+   */
+  source_type?: 'distilled' | 'imported';
+  /**
+   * 导入型人格的原始文件完整路径（仅 source_type='imported' 时有值）。
+   * 仅作展示和溯源用途，文件可能已被用户移动/删除。
+   */
+  imported_from?: string;
 }
 
 /** 发布结果（publishPersona 返回值） */
@@ -69,8 +80,12 @@ export interface Recipe {
 export interface PersonaCreateInput {
   /** 留空时主进程生成"未命名人格 HH:mm"占位名 */
   name?: string;
-  /** 留空时使用第一个内置配方 */
+  /** 留空时使用第一个内置配方；source_type='imported' 时忽略此字段 */
   recipe_name?: string;
+  /** 来源类型，留空视为 'distilled' */
+  source_type?: 'distilled' | 'imported';
+  /** 导入型人格的原始文件完整路径（source_type='imported' 时传入） */
+  imported_from?: string;
 }
 
 /** persona:add-material 入参 */
